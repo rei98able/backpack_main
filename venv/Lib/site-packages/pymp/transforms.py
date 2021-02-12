@@ -1,0 +1,372 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Jul  2 12:26:43 2018
+
+@author: Michael
+"""
+# Standard Library Imports
+import math
+
+# Python Package Imports
+import numpy as np
+
+
+# Define functions to generate various rotation matrices.
+
+def Rx(theta, units='deg'):
+    """ Generate a rotation matrix around the X axis. """
+    if units == 'deg':
+        theta = np.deg2rad(theta)
+
+    return np.mat([[1, 0, 0],
+                   [0, np.cos(theta), -np.sin(theta)],
+                   [0, np.sin(theta), np.cos(theta)]
+                   ],
+                  dtype='f8'
+                  )
+
+
+def Ry(theta, units='deg'):
+    """ Generate a rotation matrix around the Y axis. """
+    if units == 'deg':
+        theta = np.deg2rad(theta)
+
+    return np.mat([[np.cos(theta), 0, np.sin(theta)],
+                   [0, 1, 0],
+                   [-np.sin(theta), 0, np.cos(theta)]
+                   ],
+                  dtype='f8'
+                  )
+
+
+def Rz(theta, units='deg'):
+    """ Generate a rotation matrix around the Z axis. """
+    if units == 'deg':
+        theta = np.deg2rad(theta)
+
+    return np.mat([[np.cos(theta), -np.sin(theta), 0],
+                   [np.sin(theta), np.cos(theta), 0],
+                   [0, 0, 1]
+                   ],
+                  dtype='f8'
+                  )
+
+
+def AffineRx(theta, units='deg'):
+    """ Generate a affine rotation matrix around the X axis. """
+    if units == 'deg':
+        theta = np.deg2rad(theta)
+
+    return np.mat([[1, 0, 0, 0],
+                   [0, np.cos(theta), -np.sin(theta), 0],
+                   [0, np.sin(theta), np.cos(theta), 0],
+                   [0, 0, 0, 1]
+                   ],
+                  dtype='f8'
+                  )
+
+
+def AffineRy(theta, units='deg'):
+    """ Generate a affine rotation matrix around the Y axis. """
+    if units == 'deg':
+        theta = np.deg2rad(theta)
+
+    return np.mat([[np.cos(theta), 0, np.sin(theta), 0],
+                   [0, 1, 0, 0],
+                   [-np.sin(theta), 0, np.cos(theta), 0],
+                   [0, 0, 0, 1]
+                   ],
+                  dtype='f8'
+                  )
+
+
+def AffineRz(theta, units='deg'):
+    """ Generate a affine rotation matrix around the Z axis. """
+    if units == 'deg':
+        theta = np.deg2rad(theta)
+
+    return np.mat([[np.cos(theta), -np.sin(theta), 0, 0],
+                   [np.sin(theta), np.cos(theta), 0, 0],
+                   [0, 0, 1, 0],
+                   [0, 0, 0, 1]
+                   ],
+                  dtype='f8'
+                  )
+
+
+def AffineTx(dist):
+    """ Generate a affine translation matrix along the X axis. """
+    return np.mat([[1, 0, 0, dist],
+                   [0, 1, 0, 0],
+                   [0, 0, 1, 0],
+                   [0, 0, 0, 1]
+                   ],
+                  dtype='f8'
+                  )
+
+
+def AffineTy(dist):
+    """ Generate a affine translation matrix along the Y axis. """
+    return np.mat([[1, 0, 0, 0],
+                   [0, 1, 0, dist],
+                   [0, 0, 1, 0],
+                   [0, 0, 0, 1]
+                   ],
+                  dtype='f8'
+                  )
+
+
+def AffineTz(dist):
+    """ Generate a affine translation matrix along the Y axis. """
+    return np.mat([[1, 0, 0, 0],
+                   [0, 1, 0, 0],
+                   [0, 0, 1, dist],
+                   [0, 0, 0, 1]
+                   ],
+                  dtype='f8'
+                  )
+
+
+# Define functions to generate various coordinate conversion matrices.
+
+def Cyl2Rect(cyl_coords):
+    x = cyl_coords[0] * np.cos(cyl_coords[1])
+    y = cyl_coords[0] * np.sin(cyl_coords[1])
+
+    rect_coords = np.zeros_like(cyl_coords)
+    rect_coords[0] = x
+    rect_coords[1] = y
+    rect_coords[2] = cyl_coords[2]
+
+    return rect_coords
+
+
+def Rect2Cyl(rect_coords):
+    r = np.sqrt(rect_coords[0] ** 2 + rect_coords[1] ** s)
+    theta = np.arctan(rect_coords[1] / rect_coords[0])
+
+    cyl_coords = np.zeros_like(rect_coords)
+    cyl_coords[0] = r
+    cyl_coords[1] = theta
+    cyl_coords[2] = rect_coords[2]
+
+    return cyl_coords
+
+
+def lstsq_transforms_3D(I, F):
+    """
+    Return the proper rigid transformation matrix for rotations around x, y
+    and z axes as well as the translation matrix that best fit the initial
+    coordinate positions in R3 (I) to the final coordinate positions (F)
+
+    Parameters
+    ----------
+    I : numpy matrix or array shape (N,3) (arrays will be converted to matrix)
+       Initial coordinate matrix
+
+    F : numpy matrix or array shape (N,3) (arrays will be converted to matrix)
+       Fiinal coordinate matrix
+
+    Returns
+    -------
+    R : Matrix shape (3,3)
+       Best fit rotation matrix giving the rotations from I to F
+
+    t : Matrix shape (3,1)
+       Best fit translation column vextor giving the translation from I to F
+
+
+    When applying R to a vector, the vector should be a column vector to the
+    right of R.  If the right hand side is a 2D array rather than a
+    vector, then each column of the 2D array represents a vector.
+
+    Rotations are counter-clockwise.
+    """
+    # Make sure there are the same number of point coordinates to work on
+    assert len(I) == len(F)
+
+    # Do not assume you were given matrix objects (could be nupy arrays)
+    I = np.asmatrix(I)
+    F = np.asmatrix(F)
+
+    # Determine the centroid for the intial and final positions
+    centroid_I = np.mean(I, axis=0)
+    centroid_F = np.mean(F, axis=0)
+
+    # Center both sets of points
+    cI = I - centroid_I
+    cF = F - centroid_F
+
+    # Caluculate the covariance matrix and use Singular Value Decomposition
+    # (SVD) to get the U, S, and V matrices
+    H = cI.T * cF
+    U, S, V = np.linalg.svd(H)
+
+    # Compute the rotation matrix (R) between the two sets of points
+    R = V.T * U.T
+
+    # This should not happen in real life but here for testing with random
+    # input values
+    #
+    # Detect the special reflection case with det(R) = -1
+    if np.linalg.det(R) < 0:
+        print("Reflection detected")
+        V[2, :] *= -1
+        R = V.T * U.T
+
+    # Compute the translation vector
+    t = -R * centroid_I.T + centroid_F.T
+
+    return R, t
+
+
+def euler_to_matrix(x=0, y=0, z=0, units='deg'):
+    """
+    Return matrix for rotations around x, y and z axes
+
+    Parameters
+    ----------
+    x : scalar
+       Rotation angle in radians around x-axis (performed last)
+    y : scalar
+       Rotation angle in radians around y-axis
+    z : scalar
+       Rotation angle in radians around z-axis (performed first)
+    units : ['deg', 'rad']
+        Identifies degrees 'deg' or radians 'rad'
+
+    Returns
+    -------
+    M : array shape (3,3)
+       Rotation matrix giving same rotation as for the given angles
+
+
+    When applying M to a vector, the vector should be a column vector to the
+    right of M.  If the right hand side is a 2D array rather than a
+    vector, then each column of the 2D array represents a vector.
+
+    Rotations are counter-clockwise.
+    """
+    #    if units == 'deg':
+    #        x = np.deg2rad(x)
+    #        y = np.deg2rad(y)
+    #        z = np.deg2rad(z)
+    #
+    #    _Rx = np.asmatrix(np.eye(3))
+    #    _Ry = np.asmatrix(np.eye(3))
+    #    _Rz = np.asmatrix(np.eye(3))
+    #
+    #    if x:
+    #        cosx = np.cos(x)
+    #        sinx = np.sin(x)
+    #        _Rx = np.mat([[1, 0, 0],
+    #                      [0, cosx, -sinx],
+    #                      [0, sinx, cosx]], dtype='f8')
+    #    if y:
+    #        cosy = np.cos(y)
+    #        siny = np.sin(y)
+    #        _Ry = np.mat([[cosy, 0, siny],
+    #                      [0, 1, 0],
+    #                      [-siny, 0, cosy]], dtype='f8')
+    #    if z:
+    #        cosz = np.cos(z)
+    #        sinz = np.sin(z)
+    #        _Rz = np.mat([[cosz, -sinz, 0],
+    #                      [sinz, cosz, 0],
+    #                      [0, 0, 1]], dtype='f8')
+
+    _Rx = Rx(x)
+    _Ry = Ry(y)
+    _Rz = Rz(z)
+
+    return _Rz * (_Ry * _Rx)
+
+
+def matrix_to_euler(M, threshold=None):
+    ''' Discover Euler angle vector from 3x3 matrix
+
+    Parameters
+    ----------
+    M : matrix, shape (3,3)
+    cy_thresh : None or scalar, optional
+       threshold below which to give up on straightforward arctan for
+       estimating x rotation.  If None (default), estimate from
+       precision of input.
+
+    Returns
+    -------
+    x : scalar
+    y : scalar
+    z : scalar
+       Rotations in radians around x, y, z axes, respectively
+
+    Notes
+    -----
+    If there was no numerical error, the routine could be derived using
+    Sympy expression for z then y then x rotation matrix, which is:
+
+    [[cos(y)cos(z), sin(x)sin(y)coz(z)-cos(x)sin(z), cos(x)sin(y)cos(z)+sin(x)sin(z)],
+     [cos(y)sin(z), sin(x)sin(y)sin(z)+cos(x)cos(z), cos(x)sin(y)sin(z)-sin(x)cos(z)],
+     [-sin(y), sin(x)cos(y), cos(x)cos(y)]
+
+    with the obvious derivations for x, y, and z
+
+       x = atan2(r32, r33)
+       y = asin(r31)
+       z = atan2(r21, r11)
+
+    '''
+    M = np.asarray(M)
+    r11, r12, r13, r21, r22, r23, r31, r32, r33 = M.ravel()
+
+    #    if threshold is None:
+    #        try:
+    #            threshold = np.finfo(M.dtype).eps * 4
+    #        except ValueError:
+    #            threshold = FLOAT_EPS_4
+    #
+    #    # cy: sqrt((cos(y)*cos(z))**2 + (cos(x)*cos(y))**2)
+    #    cy = math.sqrt(r33*r33 + r23*r23)
+    #
+    #    # cos(y) not close to zero, standard form
+    #    if cy > threshold:
+    #        x = math.atan2(r32, r33)
+    #        y = -math.asin(r31)
+    #        z = math.atan2(r21, r11)
+    #
+    #        return x, y, z
+    #    else:
+    #        x = 0
+    #        y = math.atan2(r13,  cy) - np.pi
+    #        z = math.atan2(r12,  r23) - np.pi
+    #        return x, y, z
+
+    ########################################################
+    #    y1 = -math.asin(r31)
+    #
+    #    if r31 == -1:
+    #        y2 = -(np.pi + y1)
+    #    else:
+    #        y2 = np.pi - y1
+    #
+    #    x1 = math.atan2(r32/math.cos(y1), r33/math.cos(y1))
+    #    x2 = math.atan2(r32/math.cos(y2), r33/math.cos(y2))
+    #
+    #    z1 = math.atan2(r21/math.cos(y1), r11/math.cos(y1))
+    #    z2 = math.atan2(r21/math.cos(y2), r11/math.cos(y2))
+    #
+    #    return np.array([[x1, y1, z1],[x2,y2,z2]])
+
+    x = np.rad2deg(math.atan2(r32, r33))
+    y = np.rad2deg(math.asin(r31))
+    z = np.rad2deg(math.atan2(r21, r11))
+
+    return np.array([x, y, z])
+
+
+
+
+
+
+
+

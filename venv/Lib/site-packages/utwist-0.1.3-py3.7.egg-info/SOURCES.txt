@@ -1,0 +1,12 @@
+MANIFEST.in
+README.rst
+setup.cfg
+setup.py
+utwist/__init__.py
+utwist/_utwist.py
+utwist/test_utwist.py
+utwist.egg-info/PKG-INFO
+utwist.egg-info/SOURCES.txt
+utwist.egg-info/dependency_links.txt
+utwist.egg-info/requires.txt
+utwist.egg-info/top_level.txt

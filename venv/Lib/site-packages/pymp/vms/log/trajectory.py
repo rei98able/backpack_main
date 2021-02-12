@@ -1,0 +1,581 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of 
+this software and associated documentation files (the "Software"), to deal in 
+the Software without restriction, including without limitation the rights to 
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of 
+the Software, and to permit persons to whom the Software is furnished to do so, 
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all 
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS 
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR 
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER 
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Varian Trajectory Log Definitions
+Field definitions for Varian trajectory logs as layed out in the "TrueBeam 
+2.7MR2 Trajectory Log File Specification" found on the myvarian site
+(https://varian.force.com/)
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+
+__version__ = 4.0
+__specification__ = 'VMSTrajectoryLog_2.7MR2'
+
+# Standard python imports
+import os
+import struct
+import itertools
+
+# Third party imports
+import numpy as np
+import pandas as pd
+
+# Local imports.
+from .definitions import (COMPOSITE_FIELDS, SAMPLE_TYPE, TRACKING_TYPE, 
+                          AXIS_ENUM, Axis, EndEffect)
+from .header import VMSTrajectoryLogHeader
+from .subbeam import VMSTrajectoryLogSubbeam
+
+
+class VMSTrajectoryLog(object):
+    ''' An object representing the features of a Varian Trajectory Log file as
+        laid out in the "TrueBeam 2.7MR2 Trajectory Log File Specification" 
+        found on the myvarian site (https://myvarian.com/).
+
+        Uses the binary file path provided to determine if the file is a valid 
+        Varian Trajectory Log file and locates (if present in the same root 
+        directory) the associated .txt file for processing.
+    '''
+
+    #--------------------------------------------------------------------------
+    # 'object' interface code   
+    #--------------------------------------------------------------------------
+    def __init__(self, bin_file):
+        ''' Standard initialization function for VMSTrajectoryLog object     
+        
+            Parameters
+            ----------
+            bin_file : File
+                Binary file handle representing the Varian Trajectory Log  
+            
+            Raises
+            ------
+            FileNotFoundError
+                Raised if the path to the binary trajectory log file is not 
+                found
+        '''
+
+        # If the path exists attempt to parse it.
+        if os.path.exists(bin_file):
+            self._parse(bin_file)
+        else:
+            raise FileNotFoundError("'{}' does not exist.".format(bin_file))
+    
+    #--------------------------------------------------------------------------
+    # 'VMSTrajectoryLog' Private Methods  
+    #--------------------------------------------------------------------------
+    def _parse(self, bin_file):
+        ''' Method used to parse the Varian Trajectory Log file into its 
+            various components. 
+        
+            Parameters
+            ----------
+            bin_file : File
+                Binary file handle representing the Varian Trajectory Log 
+            
+            Raises
+            ------
+            ValueError : Exception
+                Raised if the file sugnature doesn't match the expected 
+                signature for a Varian Trajectory Log file as specified in the 
+                "TrueBeam 2.7MR2 Trajectory Log File Specification" found on the 
+                myvarian site (https://myvarian.com/).
+
+            Sets
+            ----
+            filename_bin : str
+                String representing the path to the associated Varian Trajectory 
+                Log .bin file.
+                
+            header : VMSTrajectoryLogHeader
+                The object that holds the Varian Trajectory Log header 
+                information. 
+                
+            subbeams : list 
+                A list that holds the VMSTrajectoryLogSubbeam objects.
+                
+            snapshots : numpy.array
+                The (NumberOfSnapshots X 2*samples) numpy array representing the 
+                snapshots for all axes in the Varian Trajectory Log .bin file. 
+                The 2 * samples comes from the header.samples_per_axis 
+                representing both the expected and actual values per sample.
+
+            crc : hex
+                The CRC file check for the Varian Trajectory Log .bin file
+        '''
+
+        # Use context to manage opening the binary file and read in raw bytes
+        with open(bin_file, 'rb') as tlog_file:
+            # Test file signature before parsing out raw bytes.
+            sig, = struct.unpack('16s', tlog_file.read(16))
+            sig = sig.decode('utf-8')
+
+            if sig.strip('\x00') == u'VOSTL':
+                # reset the file buffer to the '0' position
+                tlog_file.seek(0)
+
+                # Only set 'filename_bin' if valid trajectory log
+                self.filename_bin = bin_file
+
+                # Attempt to load the corresponding .txt file
+                self._load_txt()
+
+                # Build the VMSTrajectoryLogHeader passing 'self' as the
+                # vms_log object.
+                self.header = VMSTrajectoryLogHeader(self, tlog_file)
+
+                # Build the VMSTrajectoryLogSubbeams passing 'self' as the
+                # vms_log object.
+                self.subbeams = [VMSTrajectoryLogSubbeam(self, tlog_file) \
+                                   for i in range(self.header.num_subbeams)]
+
+                # Samples Per Snapshot (SPS) - Total samples for all axes
+                SPS = 2 * np.sum(self.header.samples_per_axis)
+
+                # Total Samples (TS)
+                TS = SPS * self.header.num_snapshots
+
+                # Read in all samples as a single 1D numpy.array
+                #
+                # NOTE: Uncomment out the ".copy('A')" at the end of the
+                #       np.frombuffer method below to keep the snapshots from
+                #       being readonly
+                self.snapshots = np.frombuffer(tlog_file.read(TS * 4),
+                                               dtype='f4')#.copy('A')
+
+                # Reshape the array of values to (NumberOfSnapshots X SPS)
+                self.snapshots = self.snapshots.reshape(self.header.num_snapshots,
+                                                       SPS)
+
+                # Set the recarray view of the snapshots.
+                self._set_recarray_view()
+
+                # Generate pandas.DataFrame
+                self._set_dataframe_view(self)
+
+                # Add Axis objects to this VMSTrajectoryLog object
+                self._build_axes(self)
+
+                # Assign correct beam axes to subbeams
+                self._compile_subbeam_axes()
+
+                # Read in the CRC value
+                self.crc, = struct.unpack('H', tlog_file.read(2))
+
+            # If FILE_SIGNAUTRE not 'VOSTL' raise exception.
+            else:
+                raise ValueError('Unrecognized signature for trajectory log.')
+
+    def _load_txt(self):
+        ''' Locates and parses a Varian Trajectory Log .txt file if located in 
+            the same root directory as the .bin file passed to the object 
+            constructor.
+
+            Sets
+            ----
+            txt : dict or None
+                Dictionary of key value pairs from the associated .txt file (if 
+                found) or None. No attempt is made to convert these values to 
+                python types (i.e. they remain strings).
+
+            filename_txt : str or None
+                String representing the path to the associated Varian Trajectory 
+                Log .txt file (if found) or None
+        '''
+
+        # Set the txt attrubute to an empty dict
+        self.txt = {}
+
+        # The .txt file should have the same name as the .bin file
+        self.filename_txt = self.filename_bin.replace('.bin', '.txt')
+
+        # If the .txt path exists
+        if os.path.exists(self.filename_txt):
+            # Use a context to open and read in the file information.
+            with open(self.filename_txt) as txtfile:
+                lines = txtfile.readlines()
+                for line in lines:
+                    if ':' in line.strip():
+                        items = line.split(':')
+                        self.txt[items[0].strip()] = items[1].strip()
+
+        # If the file doesn't exist simply change the file name and attribute
+        # to None
+        else:
+            self.txt = None
+            self.filename_txt = None
+
+    def _set_recarray_view(self):
+        ''' Constructs the  numpy.recarray view of the 'snapshots' attribute 
+            that segments it naturally along its axis boundaries. 
+
+            Sets
+            ----
+            index_map : dict
+                Dictionary of key (Axis Name) value (Axis Index)pairs where 
+                users can access the column index values associated with the 
+                given axis name. The index represents the first sample column 
+                for the named axis.
+
+            dtype : numpy.dtype
+                The numpy dtype object reresenting the recarray view is 
+                constructed using the definitions.AXIS_ENUM dict, 
+                definitions.COMPOSITE_TYPE dict, and the 
+                definitions.SAMPLE_TYPE numpy.dtype.
+
+            recarray : numpy.recarray
+                The numpy.recarray view giving you dot '.' access as well as 
+                dict type access '[]' to the axis and sample data (i.e. 
+                object.recarray.MU.actual or object.recarray['MU']['actual']). 
+                The numpy dtype object reresenting the view is constructed using 
+                the definitions.AXIS_ENUM dict, definitions.COMPOSITE_TYPE dict, 
+                and the definitions.SAMPLE_TYPE numpy.dtype.
+
+        '''
+        # List that will be passed to numpy.dtype constructor
+        dtype_list = []
+
+        index_map = []
+        
+        for e, i in enumerate(self.header.axis_enum):
+            axis_name = AXIS_ENUM[i] # Grab the axis name
+            
+            # Set the DTYPE based on the axis.
+            if i in (60, 61, 62, 63, 64): # One of the Developer Tracking Axes
+                DTYPE = TRACKING_TYPE
+            else:
+                DTYPE = SAMPLE_TYPE
+            
+            # Add the name and axis index to the _axis_names list (to be 
+            # converted to tuple of names dict of indices).
+            idx = np.sum(self.header.samples_per_axis[0:e]) * 2
+            index_map.append((axis_name, idx))
+            
+            # Determine how many samples for this axis
+            samples = self.header.samples_per_axis[e]
+            
+            # If there is only one sample (i.e. Expected/Actual pair)
+            if samples == 1:               
+                dtype_list.append((axis_name, DTYPE)) # Add dtype tuple
+            else: # More than 1 sample means its a composite type
+                # Compile all dtype tuples for composite dtype
+                fields = [i for i in \
+                    itertools.product(COMPOSITE_FIELDS[axis_name], (DTYPE,))]
+                
+                # Append composite axis field names and indexes to axis_names
+                index_map.extend([(i, idx + e*2) \
+                            for e, i in enumerate(COMPOSITE_FIELDS[axis_name])])
+
+                dtype_list.append((axis_name, fields)) # Add composite tuple
+        
+        # Create an axis dict for looking up column index values
+        self.index_map = dict(index_map)
+        
+        # Create the numpy.dtype
+        self.dtype = np.dtype(dtype_list)
+        
+        # Set the snapshots.view dtype and type. 
+        self.recarray = self.snapshots.view(self.dtype, np.recarray)
+
+    def _set_dataframe_view(self, parent):
+        ''' Constructs a pandas.DataFrame object view of the VMSTrajectoryLog 
+            and/or VMSTrajectoryLogSubbeam 'snapshots' attribute.
+        
+            Parameters
+            ----------
+            parent : VMSTrajectoryLog or VMSTrajectoryLogSubbeam
+                The parent object that contains the 'snapshots' attribute from 
+                which the pandas.DataFrame object will be constructed
+
+            Sets
+            ----
+            [parrent].dataframe : pandas.DataFrame
+                The pandas.DataFrame view giving you dot '.' access as well as 
+                "fancy indexing" into the trajectory log data columns. The 
+                columns are not organized according to the composite column 
+                specification in the "TrueBeam 2.7MR2 Trajectory Log File 
+                Specification" document as the pandas.DataFrame object does not 
+                support composite and non-composite columns int he same frame.
+                Therefore composite axes like MLC are represented as individual 
+                sub columns and samples (i.e. object.dataframe.LeafA1.expected 
+                not object.dataframe.MLC.LeafA1.expected) as inthe recarray view 
+                and the individual axis objects. If you need this type f axis 
+                use those views instead
+        '''
+
+        CNAMES = []
+        for e, i in enumerate(self.header.axis_enum):
+            axis_name = AXIS_ENUM[i] # Grab the axis name
+            
+            # Set the DTYPE based on the axis.
+            if i in (60, 61, 62, 63, 64): # One of the Developer Tracking Axes
+                DTYPE = TRACKING_TYPE
+            else:
+                DTYPE = SAMPLE_TYPE
+            
+            # Determine how many samples for this axis
+            samples = self.header.samples_per_axis[e]
+            
+            # If there is only one sample (i.e. Expected/Actual pair)
+            if samples == 1:               
+                CNAMES.extend([i for i in \
+                                itertools.product((axis_name,), DTYPE.names)])
+            else: # More than 1 sample means its a composite type
+                CNAMES.extend([i for i in \
+                    itertools.product(COMPOSITE_FIELDS[axis_name], 
+                                                       DTYPE.names)])
+
+        # Set the pandas.DataFrame column indexs to the column tuples
+        columns = pd.MultiIndex.from_tuples(CNAMES)
+
+        # Construct the pandas.DataFrame object for the parent object
+        parent.dataframe = pd.DataFrame(parent.snapshots,
+                                        columns=columns
+                                        )
+        
+    def _compile_subbeam_axes(self):
+        ''' Compiles snapshots, recarray view, and the dataframe view for each 
+            of the subbeams. The views do not duplicate the data but will allow 
+            the user to access the snapshots that correspond to each of the 
+            subbeams from the subbeam itself without poluting its data with 
+            snapshot and views that correspond to the other potential subbeams 
+            in the file.
+
+            Sets (for each subbeam object)
+            ------------------------------
+            [subbeam].snapshots : numpy.array
+                The numpy array representing the snapshots for all axes in the 
+                Varian Trajectory Log .bin file that correspond to each of the 
+                subbeams within the file.
+
+            [subbeam].start_index : int
+                The starting row index for the snapshots in the subbeam object
+
+            [subbeam].stop_index : int
+                The last row index (+1) for the snapshots in the subbeam object 
+                to be used in slicing if needed.
+
+            [subbeam].index_map : dict
+                Dictionary of key (Axis Name) value (Axis Index)pairs where 
+                users can access the column index values associated with the 
+                given axis name. The index represents the first sample column 
+                for the named axis.
+
+            [subbeam].dtype : numpy.dtype
+                The numpy dtype object reresenting the recarray view is 
+                constructed using the definitions.AXIS_ENUM dict, 
+                definitions.COMPOSITE_TYPE dict, and the 
+                definitions.SAMPLE_TYPE numpy.dtype.
+
+            [subbeam].recarray : numpy.recarray
+                The numpy.recarray view giving you dot '.' access as well as 
+                dict type access '[]' to the axis and sample data (i.e. 
+                object.recarray.MU.actual or object.recarray['MU']['actual']). 
+                The numpy dtype object reresenting the view is constructed using 
+                the definitions.AXIS_ENUM dict, definitions.COMPOSITE_TYPE dict, 
+                and the definitions.SAMPLE_TYPE numpy.dtype.
+
+            [subbeam].dataframe : pandas.DataFrame
+                The pandas.DataFrame view giving you dot '.' access as well as 
+                "fancy indexing" into the trajectory log data columns. The 
+                columns are not organized according to the composite column 
+                specification in the "TrueBeam 2.7MR2 Trajectory Log File 
+                Specification" document as the pandas.DataFrame object does not 
+                support composite and non-composite columns int he same frame.
+                Therefore composite axes like MLC are represented as individual 
+                sub columns and samples (i.e. object.dataframe.LeafA1.expected 
+                not object.dataframe.MLC.LeafA1.expected) as inthe recarray view 
+                and the individual axis objects. If you need this type f axis 
+                use those views instead 
+
+            [subbeam].end_effect : EndEffect
+                Simple object to hold the index values for the snapshots that 
+                have the characteristic of and "end effect" being defind as 
+                BeamHold states that are inconsistent with the identified 
+                control point boundaries of the subbeams controlled by the 
+                Varian automation process. In these cases a "Beam On" state 
+                (i.e. BeamHold flag other than 2) extends beyond the control 
+                point boundary of one beam into the control points of another. 
+                This is also indicated by other anomalies like inconsistent 
+                'expected' and 'actual' beam on states in these snap regions.
+        '''
+
+        # CONTROL POINT BASED (ONLY) BORDER SEARCH 
+        # Grab the first snapshot index that is >= each subbeam's 'cp' value
+        # Each snapshot tells you at which control point it is taking place so 
+        # knowing where each beam starts will allow you to seperate the 
+        # snapshots into contiguous beam chunks       
+        idx1 = [np.where(self.recarray.ControlPoint.actual >= \
+                                    beam.header.control_point)[0][0] \
+                                                    for beam in self.subbeams]
+                            
+        # CONTROL POINT AND BEAM HOLD BASED BORDER SEARCH (i.e. NATURAL BORDER)
+        # Uses both the control point boundary and the beam hold axis values to
+        # determine the end of one beam and the start of another when automation 
+        # is used for delivery (i.e. based on beam on/off)
+        idx2 = [np.where((self.recarray.ControlPoint.actual >= \
+                         beam.header.control_point) & \
+                         (self.recarray.BeamHold.expected == 2) & \
+                         (self.recarray.BeamHold.actual == 2))[0][0] \
+                         for beam in self.subbeams]
+        
+        for sub in self.subbeams:
+            i = sub.header.seq_num
+            
+            # Set snapshots view
+            # For all except the last subbeam
+            if sub.header.seq_num+1 < len(self.subbeams): 
+                sub.snapshots = self.snapshots[idx1[i]:idx2[i+1],::]
+                sub._start_index = int(idx1[i])
+                sub._stop_index = int(idx2[i+1])
+
+            # the last one goes from 'cp' (or idx1[i]) through the end of the 
+            # snaps
+            else: 
+                sub.snapshots = self.snapshots[idx1[i]::,::]
+                sub._start_index = int(idx1[i])
+                sub._stop_index =int( len(self.snapshots))
+
+            # Set the subbeam's dtype
+            sub.dtype = self.dtype
+            
+            # Set the recarray view for the subbeam snapshots
+            sub.recarray = sub.snapshots.view(sub.dtype, np.recarray)
+            
+            # Set the subbeam's uderlying '_index_map ' property value
+            sub.index_map  = self.index_map                                  
+            
+            # We are looking for end effects associated with automation (mostly) 
+            # where the control point borders of the beams are sometimes 
+            # "blurred." Sometimes there are a couple snapshots that have 
+            # inconsistent BeamHold states (i.e. Ecpected value of 2 and Actual 
+            # value of 0) for the snaps on the end of one beam and at the 
+            # beginning of another when controlled by the automation process.
+            
+            # Look for end effects at both the begining and end of each subbeam
+            end_effect_start = []
+            end_effect_end = []
+            
+            # If the indexes for the CP border and the Natural Boarder aren't 
+            # the same we want to know how many of these snaps are present
+            
+            # Beginning of the beam
+            if idx1[i] != idx2[i]:
+                end_effect_start = [idx1[i], idx2[i]]
+            
+            # look at the end of the subbeams except for the last one since that 
+            # beam concludes the treatment and therefore shouldn't have this 
+            # issue
+            if i != len(self.subbeams)-1:
+                if idx1[i+1] != idx2[i+1]:
+                    end_effect_end = [idx1[i+1], idx2[i+1]]
+            
+            # Conver the lists to arrays in order to do some set operations 
+            start = np.array([])
+            end = np.array([])
+            
+            # Construct the array of indexes at the begining of the beam from 
+            # the values in the list
+            if end_effect_start:
+                start = np.arange(end_effect_start[0] - idx1[i],
+                                  end_effect_start[1] - idx1[i])
+            
+            # Construct the array of indexes at the end of the beam from the 
+            # values in the list
+            if end_effect_end:
+                end = np.arange(end_effect_end[0] - idx1[i],
+                                end_effect_end[1] - idx1[i])
+            
+            # Set the subbeam's 'end_effect' object with the snap indexes
+            # identified as the difference between the 'CP Border' and the 
+            # 'Natural Border' for each subbeam
+            sub._end_effect = EndEffect((start.astype(np.int32),),
+                                        (end.astype(np.int32),)
+                                        )
+            
+            # Generate pandas.DataFrame
+            self._set_dataframe_view(sub)
+
+            # Add Axis objects to this VMSTrajectoryLogSubbeam object
+            self._build_axes(sub)
+            
+    def _build_axes(self, parent):
+        ''' Builds an Axis object for each of the trajectory log axes and sets
+            it as an attribute on the VMSTrajectoryLog or 
+            VMSTrajectoryLogSubbeam object for easy access to columns by name 
+            (i.e. VMSTrajectoryLog.'AxisName'.expected where 'AxisName' is the 
+            name as defind in the "TrueBeam 2.7MR2 Trajectory Log File 
+            Specification" and made accessible through the index_map.keys() 
+            attribute)
+        
+            Parameters
+            ----------
+            parent : VMSTrajectoryLog or VMSTrajectoryLogSubbeam
+                The parent object that contains the 'snapshots' attribute from
+                which the pandas.DataFrame object will be constructed
+
+            Sets
+            ----
+            [parent].AxisName : Axis
+                An Axis object accessible by '.' the 'AxisName' as defind in the 
+                "TrueBeam 2.7MR2 Trajectory Log File Specification"
+        '''
+
+        for e, i in enumerate(self.header.axis_enum):
+            name = AXIS_ENUM[i] # Grab the axis name
+            
+            # Grab the start index for the axis
+            idx = self.index_map[name]
+            
+            snapshots = parent.snapshots[::,idx:idx + \
+                                         (self.header.samples_per_axis[e] * 2)]
+            
+            # Determine how many samples for this axis
+            samples = self.header.samples_per_axis[e]
+            
+            # If there is only one sample (i.e. Expected/Actual pair)
+            if samples == 1:               
+                
+                # Set axis attribute value to the right collumns in the 
+                # parent's snapshots
+                setattr(parent, name, Axis(snapshots))
+
+            # More than 1 sample means its a composite type         
+            else: 
+                # Set axis attribute value to the right collumns in the parent's 
+                # snapshots
+                setattr(parent, name, Axis(snapshots))
+                axis = getattr(parent, name)
+                
+                for enum, field in enumerate(COMPOSITE_FIELDS[name]):
+                    setattr(axis, 
+                            field, 
+                            Axis(axis.snapshots[::,enum*2:(enum*2)+2])
+                            )
+
+    #--------------------------------------------------------------------------
+    # VMSTrajectoryLog Public Methods 
+    #--------------------------------------------------------------------------
+            
+    #--------------------------------------------------------------------------
+    # VMSTrajectoryLog Properties  
+    #--------------------------------------------------------------------------

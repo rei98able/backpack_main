@@ -1,0 +1,22 @@
+Metadata-Version: 2.1
+Name: pymp
+Version: 0.0.2
+Summary: A small package of medical physics toys
+Home-page: https://github.com/tallhamer/pymp
+Author: Michael J Tallhamer MSc DABR
+Author-email: mike.tallhamer@gmail.com
+License: UNKNOWN
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Description-Content-Type: text/markdown
+Requires-Dist: numpy (>=1.16.3)
+Requires-Dist: scipy (>=1.3.0)
+Requires-Dist: pandas (>=0.25.0)
+Requires-Dist: numba (>=0.48.0pytest)
+
+# pymp
+
+This is a simple package that provides python tools for medical physics. 
+

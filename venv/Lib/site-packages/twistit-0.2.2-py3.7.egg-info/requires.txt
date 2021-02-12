@@ -1,0 +1,2 @@
+twisted>=15.0.0
+utwist>=0.1.3

@@ -1,0 +1,867 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+
+# Standard python imports
+
+# Third party imports
+import numpy as np
+from scipy import ndimage
+
+# Local imports.
+from pymp.frames.base import Axes, Axis
+
+
+class NDRefFrame(np.ndarray):
+
+    def __new__(cls, input_array, position_index=None, position=None, 
+                origin=None, scaling=None, spacing=None, offset=None):
+        # The input_array is an already formed ndarray instance so We first have
+        # to cast it into our class type
+        obj = np.asarray(input_array).view(cls)
+
+        # Add the new coordinate frame attributes to NDRefFrame instance 
+        obj._set_cframe(position_index, position, origin, scaling, spacing, 
+                        offset)
+
+        # Finally, we must return the newly created object:
+        return obj
+
+    def __array_finalize__(self, obj):
+        # If using standard constructor (e.g. going through __new__). 
+        # 
+        # NOTE: With the way __new__ is currently writen it uses view casting 
+        # within it so this really should never be used but is here for 
+        # completeness.
+        if obj is None: return
+
+        # If view casting is used (e.g numpy.array.view(NDRefFrame)) the 'obj'
+        # value is a standard numpy array type and should have no '_position'
+        # attribute
+        if not hasattr(obj, '_position'):
+            # NOTE: Uncomment below for array creation method tracking
+            # print("Used view casting to create NDRefFrame")
+
+            # Add the default coordinate frame attributes to the new NDRefFrame
+            self._set_cframe()
+            
+        
+        # If new-from-template (e.g NDRefFrame[:3]) the 'obj' value is a 
+        # NDRefFrame and should have a '_positin' attribute
+        else:
+            # NOTE: Uncomment below for array creation method tracking
+            # print("Used new-from-template to create NDRefFrame")
+
+            # Add the default coordinate frame attributes to the new NDRefFrame
+            # This may be updated to reflect a sub reference frame of the 
+            # original if the slicing used results in a contiguous subarray with 
+            # the same number of dimensions.
+            self._set_cframe()
+
+            # Need to check this because of native numpy functions like ravel(), 
+            # flatten()', and others which also create their resulting arrays 
+            # via the new-from-template' mechanism but really have no real way 
+            # of determining a rational way of applying the coordinates from the 
+            # original NDRefFrame
+            #
+            # NOTE: The '_slicing' attribute is added when you index the array 
+            #       and the __getitem__ method is called. We have overridden the 
+            #       __getitem__ method to add the '_slicing' attribute if and 
+            #       when it is used to slice the NDRefFrame.
+            if hasattr(obj, '_slicing'):
+                # Temp store slicing to avoid additional '.' access below
+                slicing = obj._slicing
+
+                # NOTE: Uncomment below for ROI creation method tracking
+                # print('Has _slicing')
+                # print(slicing.__repr__())
+                
+
+                # ROI SUPPORT CODE
+                #
+                # Simple cases for supporting ROI type indexing / slicing into a 
+                # NDRefFrame array while maintaining the coordinate mapping of 
+                # the original NDRefFrame object.
+                #
+                # NOTE: Linking of coordinates between the parent array and the 
+                #       ROI or sub array is not supported at this time.
+                # 
+                # This allows you to support a subset of 'basic' slicing and 
+                # indexing from the superset of all possible numpy indexing 
+                # which return continuous sub arrays of the same dimensionality 
+                # as the original.
+
+                if self.ndim == obj.ndim:
+                    # SIMPLEST CASES!
+
+                    # If the index value is is simply an Ellipsis (i.e. '...') 
+                    # or slice object with 'None' for all three values start, 
+                    # stop, step (i.e. [:] or [::]) you are returning the a copy 
+                    # of the original using numpy 'basic' indexing
+                    if (slicing is Ellipsis) or \
+                                    (slicing == slice(None, None, None)):     
+
+                        # NOTE: Uncomment below for ROI creation method tracking
+                        # print('SIMPLEST CASE: Ellipsis or [::]')
+
+                        # Make copies of original coordinate frame attributes
+                        position_index =  obj.position_index.copy('A')
+                        position = obj.position.copy('A')
+                        origin = obj.origin.copy('A')
+                        scaling = obj.scaling.copy('A')
+                        spacing = obj.spacing.copy('A')
+                        offset = obj.offset.copy('A') 
+                        
+                        # Set new coordinate frame attributes
+                        self._set_cframe(position_index=position_index,
+                                        position=position,
+                                        origin=origin,
+                                        scaling=scaling,
+                                        spacing=spacing,
+                                        offset=offset
+                                        )
+                        # Replicate the coordinate mappers for each axes and set 
+                        # handedness.
+                        for dim, ax in obj.axes.items():
+                            self.axes[dim].label = ax.label
+                            self.axes[dim].handedness = ax.handedness
+                            self.axes[dim].mapper = \
+                                            ax.mapper.__class__(self.axes[dim])
+
+                        return
+
+                    # If 'slicing' is a single slice object other than a slice 
+                    # object with 'None' for all three values start, stop, step 
+                    # (i.e. [:] or [::]) then all other dimensions should be 
+                    # filled in as if they were [::]
+                    if type(slicing) is slice:
+                        # NOTE: Uncomment below for ROI creation method tracking
+                        # print('IS A SLICE OTHER THAN SLICE(NONE, NONE, NONE)')
+
+                        # Set the new position to zeros to start and proceed to 
+                        # set the individual values based on the slicing used
+                        position = np.zeros(self.ndim)
+
+                        # Set spacing to the original obj.spacing
+                        spacing = obj.spacing.copy('A')
+
+                        # If the start value is None the slice starts at 0. 
+                        # Otherwise the slice starts at 'start.' Determine the 
+                        # start position coordinate and set the position value.
+
+                        position[0] = obj.axes[0].coordinates[0] \
+                                    if slicing.start is None \
+                                    else obj.axes[0].coordinates[slicing.start]
+
+                        # If the step value is None the slice step is set to 1. 
+                        # Otherwise the slice step needs to be accounted for in 
+                        # the spacing of the new mapper. Determine the step 
+                        # value and set the spacing value to the original 
+                        # spacing times the step value for that dimension.    
+                        if not slicing.step is None:
+                            spacing[0] *= slicing.step
+
+                        for i in range(1,self.ndim):
+                            # For all other dimensions assume [::] as the index
+                            position[i] = obj.axes[i].coordinates[0]
+
+                        # Set the position of the poistion_index. In this case 
+                        # the position_index will default to 0 as will the 
+                        # origin because you took those into account when 
+                        # assigning the position.
+                        self._set_cframe(position_index=None,
+                                         position=position,
+                                         origin=None,
+                                         scaling=obj.scaling.copy('A'),
+                                         spacing=spacing,
+                                         offset=obj.offset.copy('A')
+                                         )
+                        # Replicate the coordinate mappers for each axes and set 
+                        # handedness.
+                        for dim, ax in obj.axes.items():
+                            self.axes[dim].label = ax.label
+                            self.axes[dim].handedness = ax.handedness
+                            self.axes[dim].mapper = \
+                                        ax.mapper.__class__(self.axes[dim])
+                            
+                        return
+
+                    # If multiple indexes are used to index the array then any 
+                    # number of things can happen. This is an attempt to support 
+                    # the subset of cases where the returned array is continuous 
+                    # and of the same dimention as the original ndarray.
+
+                    # SIMPLEST OF THE NOT SO SIMPLE CASES
+
+                    # NOTE: Uncomment below for ROI creation method tracking
+                    # print('NOT SO SIMPLE ANYMORE')
+
+                    # If you have an index for each of the dimensions things 
+                    # aren't so bad
+                    if len(slicing) == self.ndim:
+                        # NOTE: Uncomment below for ROI creation method tracking
+                        # print('SAME LENGTH SLICING')
+
+                        # Set the new position to zeros to start and proceed to 
+                        # set the individual values based on the slicing used
+                        position = np.zeros(self.ndim)
+
+                        # Set spacing to the original obj.spacing
+                        spacing = obj.spacing.copy('A')
+                        
+                        # Iterate over the range of dimensions (i.e. 'i' 
+                        # represents the current dimention you are working on)
+                        for i in range(self.ndim):
+                            # Grab the index value for the current dimension.
+                            s = slicing[i]
+                            
+                            # If the index is a slice object you have three 
+                            # nubers to work with.
+                            if type(s) is slice:
+                                
+                                # If the start value is None the slice starts at 
+                                # 0. Otherwise the slice starts at 'start.' 
+                                # Determine the start position coordinate and 
+                                # set the position value.
+                                
+                                position[i] = obj.axes[i].coordinates[0] \
+                                    if s.start is None \
+                                    else obj.axes[i].coordinates[s.start]
+                                
+                                # If the step value is None the slice step is 
+                                # set to 1. Otherwise the slice step needs to be 
+                                # accounted for in the spacing of the new 
+                                # mapper. Determine the step value and set the 
+                                # spacing value to the original spacing times 
+                                # the step value for that dimension.    
+                                if not s.step is None:
+                                    spacing[i] *= s.step
+                            
+                            # Just because there is an index for each dimension 
+                            # doesn't mean that the index isn't an Ellipsis 
+                            # (i.e. '...') or a slice object with 'None' for all 
+                            # three values start, stop, step  (i.e. [:] or [::]) 
+                            # so we have to check and handle this case.
+                            elif (s is Ellipsis) or \
+                                            (s == slice(None, None, None)):
+                                position[i] = obj.axes[i].coordinates[0]
+
+                            # If any of the indexes are a single int you are 
+                            # slicing through a single "plane" and therefore
+                            # reducing the dinensionalityog the array so we just 
+                            # return the array initialized to the default values 
+                            # for a new coordinate frame of reference and leave 
+                            # it to the user. 
+                            #
+                            # NOTE: During testing this should be removed as the 
+                            #       dimensionality check above should avoid this 
+                            #       from ever being reached.
+                            elif type(s) is int:
+                                return
+                        
+                        # ------------------------------------------------------
+                        # If you make it through all of the checks above you 
+                        # should have a continuous grid of the same dimention.
+                        # ------------------------------------------------------
+                        
+                        # Set the position of the poistion_index. In this case 
+                        # the position_index will default to 0 as will the 
+                        # origin because you took those into account when 
+                        # assigning the position.
+                        self._set_cframe(position_index=None,
+                                         position=position,
+                                         origin=None,
+                                         scaling=None,
+                                         spacing=spacing,
+                                         offset=obj.offset.copy('A')
+                                         )
+                        # Replicate the coordinate mappers for each axes and 
+                        # set handedness.
+                        for dim, ax in obj.axes.items():
+                            self.axes[dim].label = ax.label
+                            self.axes[dim].handedness = ax.handedness
+                            self.axes[dim].mapper = \
+                                            ax.mapper.__class__(self.axes[dim])
+
+                        return
+
+                    # If you don't have the same number of indexes 'fancy' 
+                    # things have to happen. 
+                    # 
+                    # NOTE: Add support as needed here.
+                    else:
+                        # NOTE: No support at this time
+                        pass                    
+                else:
+                    pass
+
+                # Finally remove the _slicing attribute
+                del obj._slicing 
+
+            # The obj doesn't have a '_slicing' attribute
+            else:
+                # NOTE: Uncomment below for array creation method tracking
+                # print('Does not have _slicing')
+
+                # This is used if NDRefFrame.copy() is used
+                #
+                # NOTE: 'shape' is used because numpy does something strange 
+                #       with the copy methode that prevents me from using an 
+                #       elemental analysis like numpy.array_equal for now
+                if self.shape == obj.shape:
+                    # Use the _set_cframe method on 'self' to match the new 
+                    # NDRefFrame coordinate attributes to the source 'obj' 
+                    # coordinate frame attributes.
+
+                    # Make copies of original coordinate frame attributes
+                    position_index =  obj.position_index.copy('A')
+                    position = obj.position.copy('A')
+                    origin = obj.origin.copy('A')
+                    scaling = obj.scaling.copy('A')
+                    spacing = obj.spacing.copy('A')
+                    offset = obj.offset.copy('A') 
+
+                    # Set new coordinate frame attributes
+                    self._set_cframe(position_index=position_index,
+                                     position=position,
+                                     origin=origin,
+                                     scaling=scaling,
+                                     spacing=spacing,
+                                     offset=offset
+                                     )
+                    # Replicate the coordinate mappers for each axes and set 
+                    # handedness.
+                    for dim, ax in obj.axes.items():
+                        self.axes[dim].label = ax.label
+                        self.axes[dim].handedness = ax.handedness
+                        self.axes[dim].mapper = \
+                                            ax.mapper.__class__(self.axes[dim])
+
+                    return
+
+    def __getitem__(self, value):
+        ''' '''
+        # NOTE: Uncomment the below to see how often this is getting called. 
+        #       Look at calling 'coordinate_mesh' on an Axis object to display 
+        #       it from within an iPython terminal for example.
+        
+        #print(value)
+        
+
+        # Avoid adding too much code to this function as you cannot guarantee 
+        # you know all the circumstances where it is used internally.
+
+        # This is only here to save the slicing used for later determining if a 
+        # supported form was passed to apply a subregion's coordinates to the 
+        # resulting array
+        try:
+            setattr(self, '_slicing', value)
+        except Exception as e:
+            raise(e)
+
+        # Use the internall numpy.array machinery tobe safe
+        return super(NDRefFrame, self).__getitem__(value)
+
+    def _set_cframe(self, position_index=None, position=None, origin=None, 
+                    scaling=None, spacing=None, offset=None, **kwargs):
+        ############################################################
+        # Add the new attribute to the created NDRefFrame instance #
+        ############################################################
+
+        # The index array for the reference position. If not set will default 
+        # to numpy 0 position. 
+        # 
+        # NOTE: Negative indexes are suported and are interpreted as any other 
+        #       numpy index.
+        self.position_index = position_index
+        
+        # The position array for the reference index. If not set will default 
+        # to a numpy array of zeros with appropriate dimension.
+        self.position = position
+
+        # The origin for the grid's coordinate system. If not set will default
+        # to numpy array of zeros with appropriate dimension.
+        self.origin = origin
+
+        # The scaling array for the ndarray. 
+        #
+        # NOTE: This is a numpy array with each number representing the scaling 
+        #       along the corresponding dimension. If not set will default to 
+        #       numpy ones array of the correct dimension.
+        self.scaling = scaling
+        
+        # The Spacing array for the ndarray. 
+        #
+        # NOTE: This is a numpy array with each number representing the spacing 
+        #       along the corresponding dimension. If not set will default to 
+        #       numpy ones array of the correct dimension.
+        self.spacing = spacing
+        
+        # The coordinate position offset array for the ndarray with each number 
+        # representing the offset of the coordinate position within the cell 
+        # from 0.0 to 1.0 with 0.0 representing the upper boarder of the cell 
+        # and 1.0 representing the lower boarder of the cell (e.g. for a 2D 
+        # cell the value array([0.0,0.0]) would place the defined coordinate at 
+        # the upper left corner of the cell while array([0.5,0.5]) and 
+        # array([1.0,1.0]) would place it in the center and lower right 
+        # respectively).If not set it will default to a numpy array with 0.0 
+        # for all dimensions.
+        #
+        # Be very carefull when using this parameter. If you're not sure if you
+        # need to use this you probably don't need it and should use the 
+        # default values. 
+        #
+        # It can cause issues when using the 'coordinates_to_index' function to 
+        # retrieve index values for use in interpolation functions like 
+        # 'map_coordinates' as values greater than [0.,0.] can produce index 
+        # values that are negative around the boundaries of the array. Using 
+        # the [0.,0.] default will avoid this issue as the math will always 
+        # work out to give positive values for the calculated index values.
+        self.offset = offset
+
+        # The dict of axes representing the reference frame coordinates
+        self._axes = Axes()
+
+        # Add an Axis for each dimension
+        for i in range(self.ndim):
+            self._axes[i] = Axis(self, i) 
+
+    def _validate(self, array):
+        """ Validates an array against the dimensionality of the numpy.ndarray.
+        """        
+        if array is None:
+            return True
+
+        if self.ndim == len(array):
+            return True
+        else:
+            msg = "Validation Error: 'array' must be of length %s to be valid"
+            raise ValueError(msg%(self.ndim)) 
+
+    @property
+    def position(self):
+        """ Returns the position array for the the reference index. If not set 
+            it will default to an appropriately sized array of zeros.
+        """
+        # If the position was not initialized, initialize it to zero.
+        if self._position is None:
+            self._position = np.zeros(self.ndim)
+
+        return self._position
+
+    @position.setter
+    def position(self, array):
+        """ Sets the position array for the reference index.
+        """
+        if self._validate(array):
+            if array is None:
+                self._position = array
+            else:
+                self._position = np.asarray(array)
+
+    @property
+    def position_index(self):
+        """ Returns the index array for the reference position.
+        """
+        # If the position index was not initialized, initialize it to the numpy
+        # position for the array zero.
+        if self._position_index is None:
+            self._position_index = np.zeros(self.ndim, dtype=int)
+
+        return self._position_index
+
+    @position_index.setter
+    def position_index(self, array):
+        """ Set the position index associated the reference position.
+        """
+
+        if self._validate(array):
+            if array is None:
+                self._position_index = array
+            else:
+                a = np.asarray(array).astype(int)
+                # Convert (-) index values to cooresponding (+) index values
+                for e, i in enumerate(a):
+                    if i < 0:
+                        a[e] = self.shape[e] + i
+                self._position_index = a
+
+    @property
+    def origin(self):
+        """ Returns the origin for the grid's coordinate system. If not set
+            will default to zero.
+        """
+        # If the origin was not initialized, initialize it to zeros.
+        if self._origin is None:
+            self._origin = np.zeros(self.ndim)
+
+        return self._origin
+
+    @origin.setter
+    def origin(self, array):
+        """ Set the origin for the reference frame's coordinate system.
+        """
+        if self._validate(array):
+            if array is None:
+                self._origin = array
+            else:
+                self._origin = np.asarray(array)      
+
+    @property
+    def scaling(self):
+        """ Returns the scaling for the reference coordinate system. If not set
+            will default to numpy ones array.
+        """
+        # If the scaling was not initialized, initialize it to ones.
+        if self._scaling is None:
+            self._scaling = np.ones(self.ndim)
+
+        return self._scaling
+
+    @scaling.setter
+    def scaling(self, array):
+        """ Set the scaling for the reference coordinate system.
+        """
+        if self._validate(array):
+            if array is None:
+                self._scaling = array
+            else:
+                self._scaling = np.asarray(array)
+            
+    @property
+    def spacing(self):
+        """ Returns the spacing for the reference coordinate system. If not set
+            will default to numpy ones array.
+        """
+        # If the spacing was not initialized, initialize it to ones.
+        if self._spacing is None:
+            self._spacing = np.ones(self.ndim)
+
+        return self._spacing
+
+    @spacing.setter
+    def spacing(self, array):
+        """ Set the spacing for the reference coordinate system.
+        """
+        if self._validate(array):
+            if array is None:
+                self._spacing = array
+            else:
+                self._spacing = np.asarray(array)
+            
+    @property
+    def offset(self):
+        """ Returns the coordinate position offset for the reference coordinate 
+            system. If not set will default to numpy array of 0.5 for all 
+            dimensions.
+        """
+        # If the offset was not initialized, initialize it to 0.0.
+        if self._offset is None:
+            self._offset = np.zeros(self.ndim)
+
+        return self._offset
+
+    @offset.setter
+    def offset(self, array):
+        """ Set the offset for the reference coordinate system.
+        """
+        if self._validate(array):
+            if array is None:
+                self._offset = array
+            elif (np.all(array>=0.0) and np.all(array<=1.0)): 
+                self._offset = np.asarray(array)
+            else:
+                msg = "'offset' values must be between 0 and 1 or None"
+                raise ValueError(msg)
+
+    @property
+    def axes(self):
+        """ Returns the axes dict for the reference frame.
+        """
+        return self._axes
+
+    @property
+    def coordinates(self):
+        """ Returns an array of coordinates organized column wise. The 
+            coordinates are in numpy order.
+        """
+        result = None
+        
+        for i in range(self.ndim):
+            if result is None:
+                result = self.axes[i].coordinate_mesh.ravel()
+            else:
+                result = np.vstack((result,self.axes[i].coordinate_mesh.ravel()))
+                
+        return result.T
+        
+    @property
+    def table_array(self):
+        """ Returns an array of coordinates and values organized column wise. 
+            The coordinates are in numpy order.
+        """
+        result = None
+        
+        for i in range(self.ndim):
+            if result is None:
+                result = self.axes[i].coordinate_mesh.ravel()
+            else:
+                result = np.vstack((result,self.axes[i].coordinate_mesh.ravel()))
+        result = np.vstack((result,self.ravel()))
+        return result.T
+        
+    @property
+    def coordinate_recarray(self):
+        """ Returns an array of coordinate arrays with the same dimensionality 
+            as the NDRefFrame and who's coordinate arrays are in numpy order. 
+            The coordinates are generated with the mapper labels and are 
+            constructed in a grid dimensionality independent way. The 
+            coordinate arrays are constructed using the coordinate mesh 
+            returned from each of the the NDRefFrame coordinate mappers.
+        """
+        dt_list = []
+        labels = {}
+        coord_types = {}
+        
+        # Create a dtype list with names and dtypes for each of the NDRefFrame 
+        # dimensions and then pass it to np.dtype to construct the data type.
+        for i in range(self.ndim):
+            # Get the axis label or set a default.
+            if self.axes[i].label is None:
+                labels[i] = 'axis_%s'%(i)
+            else:
+                labels[i] = self.axes[i].label
+                
+            # Get the coordinate type for the axis coordinate
+            coord_types[i] = self.axes[i].coordinates.dtype
+            
+            # Append the coord tuple with label and type to the dt_list.
+            dt_list.append((labels[i], coord_types[i]))
+            
+        dt = np.dtype(dt_list)
+        
+        # Construct an array with the same dimensions as the NDGrid but using 
+        # the new dtype.
+        coords = np.zeros_like(self)
+        coords = coords.astype(dt)
+        
+        # For each dimension select all the coresponding positions within the 
+        # coordinate array and then set the coordinate for that position to the 
+        # coordinates from the coresponding mapper's coordinate_mesh.
+        for i in range(self.ndim):
+            coords[labels[i]] = self.axes[i].coordinate_mesh
+        return coords
+
+    @property
+    def coordinate_array(self):
+        """ Returns an array of coordinates with the ndim equal to the 
+            NDRefFrame's (+1). The extra dimension has the length of the 
+            coordinate for each position within the array. So for an NDRefFram N
+            with the shape = (3,4) the coordinates would be a simple pair 
+            representing the 'i' and 'j' location within the array. Calling
+            N.coordinate_array would result in an array of the shape (3,4,2).
+            This can be used in a number of different coordinate transformation 
+            calculation calculated more rapidly using numpy array based 
+            calculations.
+        """
+        shape = '{},' * self.ndim
+        shape = '(' + shape + '{})'
+        shape = shape.format(*self.shape, self.ndim)
+
+        return self.coordinates.reshape(eval(shape))
+
+    def coordinates_to_index(self, coordinates):
+        # Check to make sure the coordinates specified are appropriate for the
+        # dimensionality of the grid. Since there is no good or reliable way
+        # of filling in missing dimensions it simply raises an error if the
+        # coordinate dimension and the grid dimension are different.
+        if coordinates.shape[-1] != self.ndim:
+            msg = 'Coordinates specified are of the wrong dimension.'
+            raise ValueError(msg)
+
+        if len(coordinates.shape) == 1:
+            coordinates = coordinates.reshape((1,self.ndim))
+
+        handedness = np.ones(coordinates.shape[-1], dtype=float)
+        for i in self.axes:
+            if self.axes[i].handedness == 'L':
+                handedness[i] = -1.0
+
+        # Compute the pixel coordinates.
+        icoords = coordinates + self.origin
+        icoords -= self.position
+        # icoords *= handedness
+        icoords += self.position_index * \
+                                    (self.spacing * self.scaling * handedness)
+        icoords /= (self.spacing * self.scaling * handedness)
+
+        if np.all(icoords >= (-1 * self.offset)):
+            if np.all(icoords <= (np.array(self.shape) + (1.0 - self.offset))):
+                return tuple([i for i in icoords.T])
+            else:
+                msg = 'One or more ooordinate are beyond the boundaries'
+                raise ValueError(msg)
+        else:
+            msg ='One or more ooordinate are beyond the boundaries'
+            raise ValueError(msg)
+
+    def index_to_coordinates(self, indices):
+        # Check to make sure the indices specified are appropriate for the
+        # dimensionality of the array. Since there is no good or reliable way
+        # of filling in missing dimensions it simply raises an error if the
+        # len of the tuple of indexes and the array dimension are different.
+        if len(indices) != self.ndim:
+            msg = 'Indices specified are of the wrong dimension'
+            raise ValueError(msg)
+        
+        idxs = None
+        for i in indices:
+            if idxs is None:
+                idxs = i
+            else:
+                idxs = np.vstack((idxs,i))
+
+        idxs = idxs.T
+        
+        handedness = np.ones(idxs.shape[-1], dtype=float)
+        for i in self.axes:
+            if self.axes[i].handedness == 'L':
+                handedness[i] = -1.0
+
+        # Compute the coordinates.
+        # coords = idxs * self.spacing * self.scaling * handedness
+        coords = (idxs - self.position_index) * \
+                                        self.spacing * self.scaling * handedness
+        # coords -= self.position_index
+        coords += self.position
+        coords -= self.origin
+        
+        return coords
+
+    def probe(self, coords, order=1):
+        """ Used to gather data values from the undlying array at the supplied 
+            coodinate positions.
+        """
+        if coords.shape[-1] != self.ndim:
+            msg = f'Coordinates should be of shape (N,{self.ndim}).'
+            raise ValueError(msg)
+
+        idxs = self.coordinates_to_index(coords)
+        values = ndimage.map_coordinates(self, idxs, order=order)
+
+        return values
+
+    def place_locator(self, coordinates):
+        """ Places and returns an instance of an 'NDMarker' object on the 
+            underlying array at the coordinate specified.
+        """
+        if self._validate(coordinates):
+            return NDRefLocator(self, self.coordinates_to_index(coordinates))
+
+class NDRefLocator(object):
+    """ An NDMarker is much like an NDCell. An NDMarker adds an offset property 
+        in addition to an index that allows you to specify the offset 
+        to the true point within the cell of interest. It should be used when
+        an absolute position or location is desired and not just a cell that 
+        satisfies a given condition.
+        
+        An NDMarker will always report the intended position no matter how you
+        manipulate the ndframe coordinates since it is tied to the poisition on
+        the ndframe.
+    """
+    def __init__(self, ndframe, index_tuple, **kwargs):
+        """ Initialize the NDLocation with the supplied data.
+        """
+        super(NDRefLocator, self).__init__(**kwargs)
+        
+        # The grid to which this cell is attached.
+        if issubclass(type(ndframe), NDRefFrame):
+            self._ndframe = ndframe
+
+        # The tuple of index arrays.
+        #
+        # NOTE: This is in numpy indexing [y,x]
+        if self._validate(index_tuple):
+            self._index_tuple = index_tuple       
+
+    #---------------------------------------------------------------------------
+    #  Properties.
+    #---------------------------------------------------------------------------
+    
+    @property
+    def ndframe(self):
+        """ Return the ndframe this cell is attached to.
+        """
+        return self._ndframe
+
+    @property
+    def index_tuple(self):
+        """ Return the index tuple for the cell in the grid.
+        """
+        return self._index_tuple
+
+    @property
+    def value(self):
+        return self.ndframe.probe(self.coordinates)
+        
+    @property
+    def table_array(self):
+        """ Returns an array of coordinates and values organized column wise. 
+            The coordinates are in numpy order.
+        """
+        result = self.value
+        if len(result.shape) == 1:
+            result = result.reshape((1,result.shape[0]))
+        
+        return np.hstack((self.coordinates, result.T))
+        
+    @property
+    def coordinates(self):
+        """ Return the coordinates for the location organized column wise.
+        """
+        return self.ndframe.index_to_coordinates(self.index_tuple)
+        
+    @property
+    def center(self):
+        """ Return the coordinates for the center of the cell coordinates.
+        """
+        return np.array([c.mean() for c in self.coordinates.T])
+            
+    #--------------------------------------------------------------------------
+    #  'NDCell' Private methods.
+    #--------------------------------------------------------------------------
+
+    def _validate(self, array):
+        """ Validates an array against the dimensionality of the NDRefFrame.
+        """
+        if array is None:
+            return True
+
+        if self.ndframe is None:
+            return True
+        else:
+            if self.ndframe.ndim == len(array):
+                return True
+            else:
+                raise ValueError

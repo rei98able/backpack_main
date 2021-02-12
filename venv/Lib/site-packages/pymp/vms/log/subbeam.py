@@ -1,0 +1,244 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of 
+this software and associated documentation files (the "Software"), to deal in 
+the Software without restriction, including without limitation the rights to 
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of 
+the Software, and to permit persons to whom the Software is furnished to do so, 
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all 
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS 
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR 
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER 
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Varian Trajectory Log Definitions
+Field definitions for Varian trajectory logs as layed out in the "TrueBeam 
+2.7MR2 Trajectory Log File Specification" found on the myvarian site
+(https://varian.force.com/)
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+# Standard python imports
+
+# Third party imports
+
+# Local imports.
+from .header import VMSTrajectoryLogSubbeamHeader
+
+class VMSTrajectoryLogSubbeam(object):
+    ''' Simple storage object that parses out, stores, and provides 'get' access 
+        to the subbeam information for a VMSTrajectoryLog. The simplistic 
+        'readonly' access provided by the properties is used to discourage 
+        setting these values by mistake using the simple assignment operator '=' 
+        during use. These values are used in a number of calculation fuctions to 
+        determine the accuracy of delivery so changing them is not recomended.
+        
+        Currently there is no reason to write a trajectory log within the Varian 
+        framework as they are very simple diagnostic tools. With that in mind 
+        assignment to these attributes with the intent to write out later is not 
+        supported at this time.
+
+        Stores (externally set in 'VMSTrajectoryLog._compile_subbeam_axes'
+        ------------------------------------------------------------------
+        snapshots : numpy.array
+            The numpy array representing the snapshots for all axes in the 
+            Varian Trajectory Log .bin file that correspond to each of the 
+            subbeams within the file.
+
+        start_index : int
+            The starting row index for the snapshots in the subbeam object
+
+        stop_index : int
+            The last row index (+1) for the snapshots in the subbeam object to 
+            be used in slicing if needed.
+
+        index_map : dict
+            Dictionary of key (Axis Name) value (Axis Index)pairs where users 
+            can access the column index values associated with the given axis 
+            name. The index represents the first sample column for the named 
+            axis.
+
+        dtype : numpy.dtype
+            The numpy dtype object reresenting the recarray view is constructed 
+            using the definitions.AXIS_ENUM dict, definitions.COMPOSITE_TYPE 
+            dict, and the definitions.SAMPLE_TYPE numpy.dtype.
+
+        recarray : numpy.recarray
+            The numpy.recarray view giving you dot '.' access as well as dict 
+            type access '[]' to the axis and sample data (i.e. 
+            object.recarray.MU.actual or object.recarray['MU']['actual']). The
+            numpy dtype object reresenting the view is constructed using the 
+            definitions.AXIS_ENUM dict, definitions.COMPOSITE_TYPE dict, and the 
+            definitions.SAMPLE_TYPE numpy.dtype.
+
+        dataframe : pandas.DataFrame
+            The pandas.DataFrame view giving you dot '.' access as well as 
+            "fancy indexing" into the trajectory log data columns. The columns 
+            are not organized according to the composite column specification in 
+            the "TrueBeam 2.7MR2 Trajectory Log File Specification" document as 
+            the pandas.DataFrame object does not support composite and 
+            non-composite columns int he same frame. Therefore composite axes 
+            like MLC are represented as individual sub columns and samples (i.e. 
+            object.dataframe.LeafA1.expected not 
+            object.dataframe.MLC.LeafA1.expected) as inthe recarray view and the 
+            individual axis objects. If you need this type f axis use those 
+            views instead 
+
+        end_effect : EndEffect
+            Simple object to hold the index values for the snapshots that have 
+            the characteristic of and "end effect" being defind as BeamHold 
+            states that are inconsistent with the identified control point 
+            boundaries of the subbeams controlled by the Varian automation 
+            process. In these cases a "Beam On" state (i.e. BeamHold flag other 
+            than 2) extends beyond the control point boundary of one beam into 
+            the control points of another. This is also indicated by other 
+            anomalies like inconsistent 'expected' and 'actual' beam on states 
+            in these snap regions.
+    '''
+
+    #--------------------------------------------------------------------------
+    # 'object' interface code   
+    #--------------------------------------------------------------------------        
+    def __init__(self, vms_log, _file):
+        ''' Standard initialization function for the VMSTrajectoryLogSubbeam 
+            object
+        
+            Parameters
+            ----------
+            vms_log : VMSTrajectoryLog
+                The VMSTrajectoryLog representing the Varian Trajectory Log file 
+                being processed and the one this subbeam belongs to.
+
+            _file : File
+                An open binary file stream representing the Varian Trajectory 
+                Log.
+
+            Sets
+            ----
+            vms_log : VMSTrajectoryLog
+                The VMSTrajectoryLog representing the Varian Trajectory Log file 
+                being processed and the one this subbeam belongs to.
+        ''' 
+
+        # Set the '_vms_log' attribute to point to the parent VMSTrajectoryLog.
+        self._vms_tlog = vms_log
+
+        # Parse out the subbeams from the open trajectory log file stream.
+        self._parse(_file)
+        
+    #--------------------------------------------------------------------------
+    # 'VMSTrajectoryLogSubbeam' Private Methods  
+    #--------------------------------------------------------------------------
+        
+    def _parse(self, _file):
+        ''' Method used to parse the Varian Trajectory Log Subbeams into their
+            various components.
+        
+            Parameters
+            ----------
+            _file : File
+                An open binary file stream representing the Varian Trajectory 
+                Log.
+
+            Sets
+            ----
+            header : VMSTrajectoryLogSubbeamHeader
+                The object that holds the VMSTrajectoryLogSubbeam header 
+                information. 
+        ''' 
+
+        
+        # Build the VMSTrajectoryLogSubbeamHeader passing 'self' as the 
+        # subbeam object.
+        self._header = VMSTrajectoryLogSubbeamHeader(self, _file)
+
+    #--------------------------------------------------------------------------
+    # 'VMSTrajectoryLogSubbeam' Public Methods  
+    #--------------------------------------------------------------------------
+        
+    #--------------------------------------------------------------------------
+    # VMSTrajectoryLogSubbeam Properties  
+    #--------------------------------------------------------------------------
+    
+    @property
+    def vms_tlog(self):
+        ''' Provides 'readonly' or 'get' access to the '_vms_tlog' private 
+            attribute.
+
+            Returns
+            -------
+            VMSTrajectoryLog
+                The VMSTrajectoryLog representing the Varian Trajectory Log that 
+                this subbeam belongs to.
+        '''
+        return self._vms_tlog
+
+    @property
+    def header(self):
+        ''' Provides 'readonly' or 'get' access to the '_header' private 
+            attribute.
+
+            Returns
+            -------
+            VMSTrajectoryLogSubbeamHeader
+                The object that holds the VMSTrajectoryLogSubbeam header 
+                information for this subbeam. 
+        '''
+        return self._header
+
+    @property
+    def start(self):
+        ''' Provides 'readonly' or 'get' access to the _start_index private 
+            attribute set in the 'vms_tlog._compile_subbeam_axes' method.
+
+            Returns
+            -------
+            int
+                The starting row index for the snapshots in the subbeam object
+        '''
+        return self._start_index
+
+    @property
+    def stop(self):
+        ''' Provides 'readonly' or 'get' access to the _stop_index private 
+            attribute set in the 'vms_tlog._compile_subbeam_axes' method.
+
+            Returns
+            -------
+            int
+                The last row index (+1) for the snapshots in the subbeam object 
+                to be used in slicing if needed.
+        '''
+        return self._stop_index
+        
+    @property
+    def end_effect(self):
+        ''' Provides 'readonly' access to an EndEffect object that stores the 
+            indexes for the snaps that have the characteristic of and "end 
+            effect" being defind as BeamHold states that are inconsistent with 
+            the identified control point boundaries of the subbeams controlled 
+            by the Varian automation process. In these cases a "Beam On" state 
+            (i.e. BeamHold flag other than 2) extends beyond the control point 
+            boundary of one beam into the control points of another. This is 
+            also indicated by other anomalies like inconsistent 'expected' and 
+            'actual' beam on states in thes snap regions. The EndEffect object 
+            is set in the 'vms_tlog._compile_subbeam_axes' method.
+
+            Returns
+            -------
+            EndEffect
+                Simple object to hold the index values for the snapshots that 
+                have the characteristic of and "end effect" being defind as 
+                BeamHold states that are inconsistent with the identified 
+                control point boundaries of the subbeams controlled by the 
+                Varian automation process.
+        '''
+        return self._end_effect

@@ -1,0 +1,615 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of 
+this software and associated documentation files (the "Software"), to deal in 
+the Software without restriction, including without limitation the rights to 
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of 
+the Software, and to permit persons to whom the Software is furnished to do so, 
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all 
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS 
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR 
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER 
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Varian Trajectory Log Definitions
+Field definitions for Varian trajectory logs as layed out in the "TrueBeam 
+2.7MR2 Trajectory Log File Specification" found on the myvarian site
+(https://varian.force.com/)
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+# Standard python imports
+import sys
+import io
+
+# Third party imports
+import numpy as np
+
+# Local imports.
+
+# Maping between the defined version and the  "TrueBeam Trajectory Log File 
+# Specification standard. Will be updated when new specifications are supported.
+SPECIFICATION_MAP = {3.0: 'VMSTrajectoryLog_2.5',   # TrueBeam 2.5
+                     4.0: 'VMSTrajectoryLog_2.7MR2' # TrueBeam 2.7 MR2 
+                     }
+
+# Defined in "TrueBeam 2.7MR2 Trajectory Log File Specification" Header section 
+# in table on page 8.
+AXIS_ENUM = {
+             0: 'CollRtn',
+             1: 'GantryRtn',
+             2: 'Y1',
+             3: 'Y2',
+             4: 'X1',
+             5: 'X2',
+             6: 'CouchVert',
+             7: 'CouchLng',
+             8: 'CouchLat',
+             9: 'CouchRtn',
+             10: 'CouchPitch',
+             11: 'CouchRoll',
+             40: 'MU',
+             41: 'BeamHold',
+             42: 'ControlPoint',
+             50: 'MLC',
+             60: 'TargetPosition',          # Tracking Developer Mode Only
+             61: 'TrackingTarget',          # Tracking Developer Mode Only
+             62: 'TrackingBase',            # Tracking Developer Mode Only
+             63: 'TrackingPhase',           # Tracking Developer Mode Only
+             64: 'TrackingConformityIndex'  # Tracking Developer Mode Only
+             }
+
+# Log Scale Enum defined in "TrueBeam 2.7MR2 Trajectory Log File Specification"            
+AXIS_SCALE_ENUM = {
+                   1: 'Machine',
+                   2: 'Modified IEC 61217'
+                   }
+             
+# Defined in "TrueBeam 2.7MR2 Trajectory Log File Specification" Dose Servo 
+# States section.             
+DOSE_SERVO_STATES = {
+                     0: 'NORMAL',
+                     1: 'FREEZE',
+                     2: 'HOLD',
+                     3: 'DISABLED'
+                     }
+                     
+# Defined in "TrueBeam 2.7MR2 Trajectory Log File Specification" Header section 
+# in table on page 8.
+MLC_ENUM = {0:'NDS 80', # Added in TrueBeam v2.5 Specification
+            2:'NDS 120', 
+            3:'NDS 120 HD'
+            }
+
+# Composite fields represent axis objects that have more than 1 sample per axis
+# For example the MLC axis has 122 samples per axis representing the 2 carriages 
+# and the 120 individual leaves. The COMPOSITE_FIELDS dict allows you to define 
+# the root axis name as well as the axis names for each of the sub-samples as a 
+# tuple which will in turn be used to create the numpy.dtype object which is 
+# then used to construct the views for the axes.
+COMPOSITE_FIELDS = {'MLC': ('CarrA',
+                            'CarrB',
+                            'LeafA1',
+                            'LeafA2',
+                            'LeafA3',
+                            'LeafA4',
+                            'LeafA5',
+                            'LeafA6',
+                            'LeafA7',
+                            'LeafA8',
+                            'LeafA9',
+                            'LeafA10',
+                            'LeafA11',
+                            'LeafA12',
+                            'LeafA13',
+                            'LeafA14',
+                            'LeafA15',
+                            'LeafA16',
+                            'LeafA17',
+                            'LeafA18',
+                            'LeafA19',
+                            'LeafA20',
+                            'LeafA21',
+                            'LeafA22',
+                            'LeafA23',
+                            'LeafA24',
+                            'LeafA25',
+                            'LeafA26',
+                            'LeafA27',
+                            'LeafA28',
+                            'LeafA29',
+                            'LeafA30',
+                            'LeafA31',
+                            'LeafA32',
+                            'LeafA33',
+                            'LeafA34',
+                            'LeafA35',
+                            'LeafA36',
+                            'LeafA37',
+                            'LeafA38',
+                            'LeafA39',
+                            'LeafA40',
+                            'LeafA41',
+                            'LeafA42',
+                            'LeafA43',
+                            'LeafA44',
+                            'LeafA45',
+                            'LeafA46',
+                            'LeafA47',
+                            'LeafA48',
+                            'LeafA49',
+                            'LeafA50',
+                            'LeafA51',
+                            'LeafA52',
+                            'LeafA53',
+                            'LeafA54',
+                            'LeafA55',
+                            'LeafA56',
+                            'LeafA57',
+                            'LeafA58',
+                            'LeafA59',
+                            'LeafA60',
+                            'LeafB1',
+                            'LeafB2',
+                            'LeafB3',
+                            'LeafB4',
+                            'LeafB5',
+                            'LeafB6',
+                            'LeafB7',
+                            'LeafB8',
+                            'LeafB9',
+                            'LeafB10',
+                            'LeafB11',
+                            'LeafB12',
+                            'LeafB13',
+                            'LeafB14',
+                            'LeafB15',
+                            'LeafB16',
+                            'LeafB17',
+                            'LeafB18',
+                            'LeafB19',
+                            'LeafB20',
+                            'LeafB21',
+                            'LeafB22',
+                            'LeafB23',
+                            'LeafB24',
+                            'LeafB25',
+                            'LeafB26',
+                            'LeafB27',
+                            'LeafB28',
+                            'LeafB29',
+                            'LeafB30',
+                            'LeafB31',
+                            'LeafB32',
+                            'LeafB33',
+                            'LeafB34',
+                            'LeafB35',
+                            'LeafB36',
+                            'LeafB37',
+                            'LeafB38',
+                            'LeafB39',
+                            'LeafB40',
+                            'LeafB41',
+                            'LeafB42',
+                            'LeafB43',
+                            'LeafB44',
+                            'LeafB45',
+                            'LeafB46',
+                            'LeafB47',
+                            'LeafB48',
+                            'LeafB49',
+                            'LeafB50',
+                            'LeafB51',
+                            'LeafB52',
+                            'LeafB53',
+                            'LeafB54',
+                            'LeafB55',
+                            'LeafB56',
+                            'LeafB57',
+                            'LeafB58',
+                            'LeafB59',
+                            'LeafB60'),
+                    'TargetPosition' : ('X', 'Y', 'Z'),
+                    'TrackingTarget' : ('X', 'Y', 'Z'),
+                    'TrackingBase' :  ('X', 'Y', 'Z'),
+                    'TrackingConformityIndex' : ('Overexposed', 'Underexposed')
+                    }
+
+# Samples consist of 'expected' and 'actual' values.
+SAMPLE_TYPE = np.dtype([('expected', 'f4'), ('actual', 'f4')])
+
+# Tracking Samples consist of 'order' and 'status' values.
+TRACKING_TYPE = np.dtype([('order', 'f4'), ('status', 'f4')])
+
+class MetaData(object):
+    ''' Representation of the MetaData Structure outlined in the "TrueBeam 
+        2.7MR2 Trajectory Log File Specification" for storage of the metadata
+        added to the reserved section of the VMSTrajectoryLog header in the 
+        updated 2.7 MR2 specification.
+    '''
+    def __init__(self, metadata):
+        ''' Standard initialization function for MetaData object
+        
+            Parameters
+            ----------
+            metadata : bytes
+                The series of bytes that represent the metadata pulled from the 
+                reserved section of the VMSTrajectoryLog header.
+
+            Sets
+            ----
+            patinet_id : str
+                The utf-8 string for the Patient ID as identified in the MRN 
+                from most ROISs
+
+            plan_name : str
+                The utf-8 string for the plan name from which the beams are 
+                pulled for the current trajectory log
+
+            sop_instance_uid : str
+                The utf-8 string representing the DICOM SOPInstanceUID for the 
+                plan being run on the machine
+
+            planned_mu : float
+                The planned MU for the plan being run on the machine
+
+            remaining_mu : float
+                The remaining MU for the plan being run on the machine
+
+            energy : str
+                ASCII representation of the filed energy designation
+
+            beam_name : str
+                ASCII name of the beam being run on the machine
+        '''
+
+        # Convert the metadata series of bytes to an io.BytesIO stream
+        metadata = io.BytesIO(metadata)
+
+        # Grab the patient id by splitting the line on ':' and stripping all 
+        # whitespace surounding the value (i.e. \t and \r\n)
+        _id = metadata.readline().split(b':')[-1].strip()
+        self._patient_id = _id.decode('utf-8')
+
+        # Grab the plan name by splitting the line on ':' and stripping all 
+        # whitespace surounding the value (i.e. \t and \r\n)
+        n = metadata.readline().split(b':')[-1].strip()
+        self._plan_name = n.decode('utf-8')
+
+        # Grab the SOPInstanceUID by splitting the line on ':' and stripping all 
+        # whitespace surounding the value (i.e. \t and \r\n)
+        uid = metadata.readline().split(b':')[-1].strip()
+        self._sop_instance_uid = uid.decode('utf-8')
+
+        # Grab the planned MUs by splitting the line on ':' and stripping all 
+        # whitespace surounding the value (i.e. \t and \r\n) and convert to 
+        # float
+        self._planned_mu = float(metadata.readline().split(b':')[-1].strip())
+
+        # Grab the remaining MUs by splitting the line on ':' and stripping all 
+        # whitespace surounding the value (i.e. \t and \r\n) and convert to 
+        # float
+        self._remaining_mu = float(metadata.readline().split(b':')[-1].strip())
+
+        # Grab the energy label by splitting the line on ':' and stripping all 
+        # whitespace surounding the value (i.e. \t and \r\n)
+        e = metadata.readline().split(b':')[-1].strip()
+        self._energy = e.decode('ascii')
+
+        # Grab the beamname by splitting the line on ':' and stripping all 
+        # whitespace surounding the value (i.e. \t and \r\n)
+        bn = metadata.readline().split(b':')[-1].strip()
+        self._beam_name = bn.decode('utf-8')
+
+    @property
+    def patient_id(self):
+        ''' Provides 'readonly' or 'get' access to the _patient_id private 
+            attribute.
+
+            str
+                The utf-8 string for the Patient ID as identified in the MRN 
+                from most ROISs
+        '''
+        return self._patient_id
+
+    @property
+    def plan_name(self):
+        ''' Provides 'readonly' or 'get' access to the _plan_name private 
+            attribute.
+
+            Returns
+            -------
+            str
+                The utf-8 string for the plan name from which the beams are 
+                pulled for the current trajectory log
+        '''
+        return self._plan_name
+
+    @property
+    def sop_instance_uid(self):
+        ''' Provides 'readonly' or 'get' access to the _sop_instance_uid private 
+            attribute.
+
+            Returns
+            -------
+            str
+                The utf-8 string representing the DICOM SOPInstanceUID for the 
+                plan being run on the machine
+        '''
+        return self._sop_instance_uid
+
+    @property
+    def planned_mu(self):
+        ''' Provides 'readonly' or 'get' access to the _planned_mu private 
+            attribute.
+
+            Returns
+            -------
+            float
+                The planned MU for the plan being run on the machine
+        '''
+        return self._planned_mu
+    
+    @property
+    def remaining_mu(self):
+        ''' Provides 'readonly' or 'get' access to the _remaining_mu private 
+            attribute.
+
+            Returns
+            -------
+            float
+                The remaining MU for the plan being run on the machine
+        '''
+        return self._remaining_mu
+
+    @property
+    def energy(self):
+        ''' Provides 'readonly' or 'get' access to the _energy private attribute
+
+            Returns
+            -------
+            str
+                ASCII representation of the filed energy designation
+        '''
+        return self._energy
+
+    @property
+    def beam_name(self):
+        ''' Provides 'readonly' or 'get' access to the _beam_name private 
+            attribute.
+
+            Returns
+            -------
+            str
+                ASCII name of the beam being run on the machine
+        '''
+        return self._beam_name
+
+class Axis(object):
+    ''' Axis object to simplify the access of axis data in the 'snapshots' 
+        numpy.array. An Axis object for each axis sample (expected/actual pair) 
+        will be created and added to the root VMSTrajectoryLog and or 
+        VMSTrajectoryLogSubbeam object in a manner replicating the axis 
+        construction from the "TrueBeam 2.7MR2 Trajectory Log File 
+        Specification". 
+    '''
+
+    def __init__(self, snapshots):
+        ''' Standard initialization function for Axis object
+        
+            Parameters
+            ----------
+            snapshots : numpy.array
+                The numpy.array representing the snapshots for a specific axis 
+                in the Varian Trajectory Log .bin file.        
+        '''
+        # Set the axis snapshots to the snapshots argument provided assuming 
+        # it represents a view of the columns for a specific axis in the 
+        # VMSTrajectoryLog
+        self.snapshots = snapshots
+        
+    @property
+    def expected(self):
+        ''' Provides 'readonly' or 'get' access to the 'expected' columns for 
+            the axis object.
+        
+            Returns
+            -------
+            numpy.array
+                The column of the snapshots attribute that represents the 
+                expected values for the axis object
+        '''
+
+        # The 'expected' values should start at the first column and repeat 
+        # every other column 
+        return self.snapshots[::,0::2]
+    
+    @property
+    def actual(self):
+        ''' Provides 'readonly' or 'get' access to the 'actual' columns for the
+            axis object.
+        
+            Returns
+            -------
+            numpy.array
+                The column of the snapshots attribute that represents the actual 
+                values for the axis object
+        '''
+
+        # The 'actual' values should start at the first column and repeat every 
+        # other column
+        return self.snapshots[::,1::2]
+        
+class EndEffect(object):
+    ''' Simple object to hold the index values for the snapshots that have the
+        characteristic of and "end effect" being defind as BeamHold states that 
+        are inconsistent with the identified control point boundaries of the 
+        subbeams controlled by the Varian automation process. In these cases a 
+        "Beam On" state (i.e. BeamHold flag other than 2) extends beyond the 
+        control point boundary of one beam into the control points of another. 
+        This is also indicated by other anomalies like inconsistent 'expected' 
+        and 'actual' beam on states in thes snap regions.
+        
+        In almost all cases these snaps are inconsequential and the MU values 
+        often show no actual MUs being delivered (i.e. same value across the 
+        snaps in question). However these snaps can cause issues when blindly 
+        processing on triggers like 'BeamHold' state alone (be it expected or 
+        actual).
+    '''
+    #--------------------------------------------------------------------------
+    # 'object' interface code   
+    #--------------------------------------------------------------------------
+    def __init__(self, start, end):
+        ''' Standard initialization function for the EdnEffect object
+        
+            Parameters
+            ----------
+            start : tuple
+                A single item tuple with that item being a numpy.array similar 
+                to the index tuples returned by the numpy.where function and 
+                represents inconsisten states or 'end effects' at the start of 
+                the snapshots for the subbeam.
+
+            end : tuple
+                A single item tuple with that item being a numpy.array similar 
+                to the index tuples returned by the numpy.where function and 
+                represents inconsisten states or 'end effects' at the end of 
+                the snapshots for the subbeam.
+
+            Sets
+            ----
+            start : tuple
+                A single item tuple with that item being a numpy.array similar 
+                to the index tuples returned by the numpy.where function and 
+                represents inconsisten states or 'end effects' at the start of 
+                the snapshots for the subbeam.
+
+            end : tuple
+                A single item tuple with that item being a numpy.array similar 
+                to the index tuples returned by the numpy.where function and 
+                represents inconsisten states or 'end effects' at the end of 
+                the snapshots for the subbeam.
+        '''
+        self.start = start
+        self.end = end
+        
+    #--------------------------------------------------------------------------
+    # EndEffect Private Methods
+    #--------------------------------------------------------------------------
+    def _validate(self, value):
+        ''' Private validation method to verify that the value passed in is a 
+            single value tuple with that value being a nump.array similar to 
+            what the numpy.where function returns.
+        
+            Parameters
+            ----------
+            value : tuple
+                The value passed in should be a single value tuple with that 
+                value being a nump.array similar to what the numpy.where 
+                function returns.
+            
+            Returns
+            -------
+            bool
+                'True' if the value is a single value tuple with that value 
+                being a nump.array similar to what the numpy.where function 
+                returns 'False' otherwise.
+        '''
+
+        if (type(value) is tuple) and (len(value) == 1):
+            if type(value[0]) is type(np.array([])):
+                return True
+                
+        return False
+        
+    #--------------------------------------------------------------------------
+    # EndEffect Properties  
+    #--------------------------------------------------------------------------
+    
+    @property
+    def start(self):
+        ''' Provides 'get' access to the '_start' index tuple for the EndEffect
+            object.
+        
+            Returns
+            -------
+            tuple
+                A single item tuple with that item being a numpy.array similar 
+                to the index tuples returned by the numpy.where function and 
+                represents inconsisten states or 'end effects' at the start of 
+                the snapshots for the subbeam.
+        '''
+
+        return self._start
+        
+    @start.setter
+    def start(self, value):
+        ''' Provides 'set' access to the '_start' index tuple for the EndEffect
+            object.
+        
+            Sets
+            ----
+            start : tuple
+                A single item tuple with that item being a numpy.array similar 
+                to the index tuples returned by the numpy.where function and 
+                represents inconsisten states or 'end effects' at the start of 
+                the snapshots for the subbeam.
+
+            Raises
+            ------
+            ValueError
+                Raised if the 'value' arguement provided is not of the correct 
+                type
+        '''
+        if self._validate(value):
+            self._start = value
+        else:
+            raise ValueError("'start' value must be a tuple of len 1")
+            
+    @property
+    def end(self):
+        ''' Provides 'get' access to the '_end' index tuple for the EndEffect
+            object.
+        
+            Returns
+            -------
+            tuple
+                A single item tuple with that item being a numpy.array similar 
+                to the index tuples returned by the numpy.where function and 
+                represents inconsisten states or 'end effects' at the end of the 
+                snapshots for the subbeam.
+        '''
+        return self._end
+        
+    @end.setter
+    def end(self, value):
+        ''' Provides 'set' access to the '_end' index tuple for the EndEffect
+            object.
+        
+            Sets
+            ----
+            end : tuple
+                A single item tuple with that item being a numpy.array similar 
+                to the index tuples returned by the numpy.where function and 
+                represents inconsisten states or 'end effects' at the end of the 
+                snapshots for the subbeam.
+
+            Raises
+            ------
+            ValueError
+                Raised if the 'value' arguement provided is not of the correct 
+                type
+        '''
+
+        if self._validate(value):
+            self._end = value
+        else:
+            raise ValueError("'end' value must be a tuple of len 1")

@@ -1,0 +1,563 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of 
+this software and associated documentation files (the "Software"), to deal in 
+the Software without restriction, including without limitation the rights to 
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of 
+the Software, and to permit persons to whom the Software is furnished to do so, 
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all 
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS 
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR 
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER 
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Varian .xim FIle Format Parser
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+
+import struct
+import numpy as np
+
+try:
+  import numba
+except:
+  numba = None
+
+# A BIG THANKS to Reese Haywood for the numpy array vs dict lookup suggestion
+NP_BLUT = np.array([(np.int8),(np.int16),(np.int32)])
+
+# Compile the LAME pixel by pixel build 3.7 python should allow the try to go in
+# 3.6 doesn't support it
+#
+# A BIG THANKS to Reese Haywood for the numba suggestion to speed up decompression
+if numba is not None: # If you have numba use it
+    try:
+        @numba.jit((numba.int64,numba.int16[:],numba.int64))
+        def calc_pixel_values(image_pos,pixel_data,image_width):
+            for i in pixel_data[image_width+1:]:
+                pixel_data[image_pos] = i + pixel_data[image_pos-1] + \
+                        pixel_data[image_pos-image_width] - pixel_data[image_pos-image_width-1]
+                image_pos += 1
+    # If numba fails to compile let the user know and revert back to standard python
+    except Exception as e:
+        print(e)
+        numba = None
+
+
+class XIMHeader(object):
+    """ A Blank object to hold and neatly display the XIM header values after parsing.
+    """
+    def __str__(self):
+        """ The String Representation of the XIM header object
+        """
+        str_repr = f"""
+        XIM 32 byte fixed header:
+        ---------------------------------------------------------------------------
+        Element                         Type                Value
+        File Format Identifier			Char1               {getattr(self, 'format_identifier', None)}             
+        File Format Version				Int4                {getattr(self, 'version', None)}                        
+        Image Width in pixels			Int4                {getattr(self, 'image_width', None)}                        
+        Image Height in pixels			Int4                {getattr(self, 'image_height', None)}                        
+        Bits Per Pixel					Int4                {getattr(self, 'bits_per_pixel', None)}                        
+        Bytes Per Pixel					Int4                {getattr(self, 'bytes_per_pixel', None)}                        
+        Compression indicator			Int4                {getattr(self, 'compression_indicator', None)}
+        ---------------------------------------------------------------------------"""
+        return str_repr
+
+class PropertyCollection(dict):
+    """ Dict like collection of all the properties listed in a .xim file. Allows 
+        dict like access  or dot (.) access to all the properties in the 
+        associated file. All property names are available through the typical 
+        dict.keys() function.
+        
+        Dot (.) access of properties will only return the property value while
+        dict type access ['property_name'] will return a dict containing all
+        the .xim file property traits (i.e. name_length, name, type and value)
+    """
+    def find(self, search_str):
+        """ Convienence function that searches for .xim Properties within the 
+            Collection of properties that have the 'search_str' in the name and 
+            returns a list of possible matches.
+            
+            The search is not case sensitive.
+            
+            Parameters
+            ----------
+            search_str : str
+                Sub string to look for in every property name. Names with 
+                matches will be returned.
+            
+        """
+        matches = []
+        
+        # For every key {i.e. property name) see if it contains the search_str.
+        # If is does add the property dict to the match list to be returned.
+        for i in self.keys():
+            if i.lower().find(search_str.lower()) != -1:
+                matches.append((i, self[i]))
+        
+        return dict(matches)
+
+    def __str__(self):
+        return '\n'.join([f"{i:50}\t{self[i]['value']}" for i in self])
+
+class VarianXIMImage(object):
+    """ Simple file wrapper that gives you object like access to all the .xim
+        file data.
+    """
+    def __init__(self,fileName, read_pixel_data=True, read_properties=True):
+        """ Standard initialization function for VarianXIMImage object.
+            Initializes a wrapper around an .xim formatted image to give object 
+            like access to all of the data structures.
+            
+            Parameters
+            ----------
+            fileName : str
+                File path to the location of the .xim image
+            
+            read_pixel_data : bool
+                Flag indicating whether or not to read in the pixel data. 
+                Deafaults to 'True' but can be set to 'False' to save time when 
+                opening a compressed images that you may only need to search for 
+                properties on.
+                
+            read_properties : bool
+                Flag indicating whether or not to read in the property data. 
+                Deafaults to 'True' but can be set to 'False' to save time when 
+                opening an images that you may only want the raw pixel data for.
+
+            Sets
+            ----
+
+            filename : str
+                the name of the name of the file being wrapped as supplied to 
+                the VarianXIMImage wrapper.
+
+            header : object
+                A simple object to store the .xim specification header data.
+
+            uncompressed_pixel_buffer_size : int
+                The size in bytes of the final uncompressed pixel bufer. Sould 
+                be equal to the (ImageWidth) * (ImageHeight) * (BytesPerPixel).
+
+            pixel_data_start_position : int
+                The start position for the pixel data within the file. Not part 
+                of the .xim format but useful if you need to go back and read in
+                the image data later and have set the 'read_pixel_data' flag to 
+                'False'
+
+            pixel_data : numpy.ndarray
+                The uncompressed pixel data for the image being wrpped
+
+            lookup_table_size : int
+                The size of the HND compression lookup table in bytes (only set 
+                if compression is indicated in the header)
+
+            lookup_table : numpy.ndarray
+                The numpy array of 2 bit compression flags indicating the number 
+                of bytes use to store each pixel differences used in the HND
+                compression (only set if compression is indicated in the header)
+
+            compressed_pixel_buffer_size : int
+                The size of the compressed pixel buffer in bytes (only set if 
+                compression is indicated in the header).
+
+            compressed_pixel_buffer : numpy.ndarray
+                The composite dtype numpy array holding the compressed pixels 
+                (only set if compression is indicated in the header).
+
+            histogram : object
+                A simple object to store the .xim specification histogram data.
+
+            properties : PropertyCollection
+                Dict like collection of the properties listed in a .xim file.
+
+            number_of_properties : int
+                The number of properties stored in the .xim file and by 
+                extension the 'properties' collection.
+
+        """
+        with open(fileName,'rb') as f:
+            # Store the .xim file name
+            self.fileName = fileName
+
+            # Add a blank 'object' to simply store the header information
+            self.header = XIMHeader()
+            
+            #------------------------------------------------------------------#
+            # Section 1 - Header (32 bytes fixed size)                         #
+            #                                                                  #
+            # Header Data:                                                     #
+            #   * File Format Identifier (Type: Char - 8 bytes)                #
+            #   * File Format Version (Type: Int4)                             #
+            #   * Image Width in pixels (Type: Int4)                           #
+            #   * Image Height in pixels (Type: Int4)                          #
+            #   * Number of Bits Per Pixel (Type: Int4)                        #
+            #   * Number of Bytes Per Pixel (Type: Int4)                       #
+            #   * Compression Indicator (Type: Int4)                           #
+            #------------------------------------------------------------------#
+            
+            # File Format Identifier (Type: Char - 8 bytes)
+            _format, = struct.unpack('8s',f.read(8))
+            self.header.format_identifier = \
+                                        _format.decode('utf-8').strip('\x00')
+            
+            # File Format Version (Type: Int4)
+            self.header.version, = struct.unpack('<i',f.read(4))
+            
+            # Image Width in pixels (Type: Int4)
+            self.header.image_width, = struct.unpack('<i',f.read(4))
+            
+            # Image Height in pixels (Type: Int4)
+            self.header.image_height, = struct.unpack('<i',f.read(4))
+            
+            # Number of Bits Per Pixel (Type: Int4)
+            self.header.bits_per_pixel, = struct.unpack('<i',f.read(4))
+            
+            # Number of Bytes Per Pixel (Type: Int4)
+            self.header.bytes_per_pixel, = struct.unpack('<i',f.read(4))
+            
+            # Compression Indicator (1=Compressed, 0=Uncompressed) (Type: Int4)
+            self.header.compression_indicator, = struct.unpack('<i',f.read(4))
+            
+            #------------------------------------------------------------------#
+            # Section 2 - Pixel Data (Compressed or Uncompressed)              #
+            #                                                                  #
+            # Uncompressed Data (Only if Compression Indicator = 0):           #
+            #   * Uncompressed Pixel Buffer Size (Type: Int4)                  #
+            #   * Uncompressed Pixel Buffer                                    #
+            #                                                                  #
+            # HND Compressed Data (Only if Compression Indicator = 1):         #
+            #   * Lookup Table Size (Type: Int4)                               #
+            #   * Lookup Table                                                 #
+            #   * Compressed Pixel Buffer Size (Type: Int4)                    #
+            #   * Compressed Pixel Buffer                                      #
+            #   * Uncompressed Pixel Buffer                                    #
+            #------------------------------------------------------------------#
+            
+            # If the image is not compressed read in the uncompressed pixel data.
+            if self.header.compression_indicator == 0:
+                
+                # Uncompressed Pixel Buffer Size (Type: Int4)
+                # 
+                # Sould be equal to:
+                #   Image Width * Image Height * Bytes Pe Pixel
+                self.uncompressed_pixel_buffer_size, = struct.unpack('<i',
+                                                                     f.read(4)
+                                                                     )
+                
+                # Store the start position for the pixel data within the file.
+                #
+                # NOTE: Not part of the .xim format but useful if you decide to 
+                # grab this data later and have set the 'read_pixel_data' flag 
+                # to 'False'
+                self.pixel_data_start_position = f.tell()
+                
+                # Check 'read_pixel_data' flag
+                if read_pixel_data:
+                    # Read in the uncompressed pixel buffer and convert it to
+                    # a numpy array of the appropriate type.
+                    #
+                    # NOTE: pixel_data = Uncompressed Pixel Buffer from the xim
+                    # specification
+                    self.pixel_data = \
+                    np.fromstring(f.read(self.uncompressed_pixel_buffer_size), 
+                                         dtype=NP_BLUT[self.bytes_per_pixel])
+                    
+                    # Reshape the numpy array of pixels into a 2D image of
+                    # (Image Height x Image Width) per numpy axis ordering
+                    self.pixel_data = \
+                        self.pixel_data.reshape((self.header.image_height,
+                                                 self.header.image_width
+                                                 )
+                                                )
+                # If you chose to skip the image data seek past it
+                else:
+                    f.seek(self.uncompressed_pixel_buffer_size, 1)
+            
+            # Else the image is compressed with HND so you have to tackel the 
+            # decompression of the image in order to get the pixel data
+            else:
+                # Lookup Table Size (Type: Int4)
+                self.lookup_table_size, = struct.unpack('<i',f.read(4))
+                
+                # Read in raw bytes of the Lookup Table (not useful yet)
+                lut = np.fromstring(f.read(self.lookup_table_size), 
+                                    dtype=np.uint8
+                                    )
+                
+                # Setup the Lookup Table for the compressed pixels
+                # Should be 4x as long as the raw bytes since each byte holds
+                # 4 compression flags (i.e. 8 bits / byte with 2 bits per flag)
+                self.lookup_table = np.zeros(self.lookup_table_size*4,
+                                             dtype=np.uint8)
+                
+                # Use bit shifting as a quick way to grab the individual flags 
+                # from each byte and assign them to the correct location in the 
+                # final Lookup Table. 
+                #
+                # NOTE: Bit shifting used for speed instead of looping over 
+                # each byte and converting it to individual 2bit flags
+                self.lookup_table[0::4] = np.right_shift(np.left_shift(lut,6),6)
+                self.lookup_table[1::4] = np.right_shift(np.left_shift(lut,4),6)
+                self.lookup_table[2::4] = np.right_shift(np.left_shift(lut,2),6)
+                self.lookup_table[3::4] = np.right_shift(np.left_shift(lut,0),6)
+                
+                # Compressed Pixel Buffer Size (Type: Int4)
+                self.compressed_pixel_buffer_size, = struct.unpack('<i',
+                                                                   f.read(4)
+                                                                   )
+                
+                # Store the start position for the pixel data within the file.
+                #
+                # NOTE: Not part of the .xim format but useful if you decide to 
+                # grab this data later and have set the 'read_pixel_data' flag 
+                # to 'False'
+                self.pixel_data_start_position = f.tell()
+                
+                # Check 'read_pixel_data' flag
+                if read_pixel_data:
+                    
+                    # Create composite numpy dtype based on partitioning of the 
+                    # pixels for compression and the now decoded bytes required 
+                    # for each difference stored located in the byte_table you 
+                    # created
+
+                    # SECTION 1: Uncompressed pixel values in first row and the 
+                    # first pixel of second row are stored as int32s
+                    s1 = [('',np.int32) for i in range(self.header.image_width + 1)]
+                    
+                    # SECTION 2: Differences are store in variable byte lengths
+                    # as defined in the byte_table. Use a byte to numpy type 
+                    # lookup dict to construct the numpy dtype entries
+                    np_types = NP_BLUT[self.lookup_table[0:-1]]
+                    s2 = [('', val) for val in np_types]
+
+                    # Combine the section into one composite numpy dtype
+                    dt = np.dtype(s1 + s2)
+                    
+                    # Compressed Pixel Buffer 
+                    #
+                    # Use the composite dtype you created to read in the entire 
+                    # compressed pixel buffer and decode each position based on 
+                    # the types and their byte lengths all in one disk access
+                    # (much faster than reading in each position and decoding 
+                    # it individually)
+                    self.compressed_pixel_buffer = np.fromfile(f, 
+                                                               dtype=dt, 
+                                                               count=1
+                                                               )
+                    
+                    # Convert the variable bit depth Compressed Pixel Buffer to
+                    # the specified bit depth pixels (still only contains the 
+                    # differences)
+                    #
+                    # This step could actually be seen as the decompression
+                    # step as represented in memory but the actual pixel values 
+                    # still haven't been calculated
+                    if self.header.bytes_per_pixel == 2:
+                        self.pixel_data = \
+                            np.array(self.compressed_pixel_buffer.tolist()[0],
+                                     dtype=np.int16
+                                     )
+                    else:
+                        self.pixel_data = \
+                            np.array(self.compressed_pixel_buffer.tolist()[0],
+                                     dtype=np.int32
+                                     )
+
+                    # Calculate the pixel values from the differences
+                    #
+                    # NOTE: THIS IS WHERE YOU SPEND ALOT OF YOUR TIME AS IT IS A
+                    # PIXEL-BY-PIXEL CALCULATION. LAME!!
+                    #
+                    # BIG THANKS to Reese Haywood for the numba suggestion
+                    #
+                    # NOTE: pixel_data = Uncompressed Pixel Buffer from the xim
+                    # specification
+                    image_pos = self.header.image_width+1
+                    if numba is not None:
+                        calc_pixel_values(image_pos, self.pixel_data, self.header.image_width)
+                    else:
+                        for i in self.pixel_data[self.header.image_width+1:]:
+                            try:
+                                self.pixel_data[image_pos] = \
+                                i + self.pixel_data[image_pos-1] + \
+                                self.pixel_data[image_pos-self.header.image_width] - \
+                                self.pixel_data[image_pos-self.header.image_width-1]
+
+                                image_pos += 1
+                            except:
+                                raise \
+                                ValueError("Something went wrong in pixel calc")
+
+                            
+                    # Reshape the numpy array of pixels into a 2D image of
+                    # (Image Height x Image Width) per numpy axis ordering
+                    self.pixel_data = \
+                             self.pixel_data.reshape((self.header.image_height, 
+                                                      self.header.image_width
+                                                      )
+                                                     )
+                
+                # If you chose to skip the image data seek past it
+                else:
+                    f.seek(self.compressed_pixel_buffer_size, 1)
+            
+            # Uncompressed Pixel Buffer Size (Type: Int4)
+            # 
+            # Sould be equal to:
+            #   Image Width * Image Height * Bytes Pe Pixel
+            self.uncompressed_pixel_buffer_size, = struct.unpack('<i',f.read(4))
+            
+            # Last check to make sure you image is correct
+            if (len(self.pixel_data.flatten()) * self.header.bytes_per_pixel) \
+                                        != self.uncompressed_pixel_buffer_size:
+                raise ValueError("Uncompressed pixel data is the wrong size")
+                    
+            #------------------------------------------------------------------#
+            # Section 3 - Histogram (Optional)                                 #
+            #                                                                  #
+            # Histogram Data:                                                  #
+            #   * Number Of Bins In Histogram (Type: Int4)                     #
+            #       - 0 if no histogram                                        #
+            #       - 1024 is typical for XI                                   #
+            #   * Histogram (Int4 x Number Of Bins In Histogram)               #
+            #------------------------------------------------------------------#
+
+            # Add a blank 'object' to simply store the histogram information
+            self.histogram = None
+            
+            # Number Of Bins In Histogram (Type: Int4)
+            number_of_bins_in_histogram, = struct.unpack('<i',f.read(4))
+            
+            # If there is a histogram read in the histogram values. The length 
+            # of the buffer should be the number of bins x (Type: Int4)
+            if number_of_bins_in_histogram > 0:
+                self.histogram = EmptyObject()
+                self.histogram.number_of_bins = number_of_bins_in_histogram
+                self.histogram.data = \
+                np.fromstring(f.read(number_of_bins_in_histogram*4), 
+                              dtype=np.int32
+                              )
+                
+            #------------------------------------------------------------------#
+            # Section 4 - Properties (Optional)                                #
+            #                                                                  #
+            # Properties Data:                                                 #
+            #   * Number Of Properties (Type: Int4)                            #
+            #                                                                  #
+            # Each Individual Properties Data:                                 #
+            #   * Name Length (Type: Int4)                                     #
+            #   * Name (Type: Charl x Name Length)                             #
+            #   * Type (Type: Int4)                                            #
+            #       - 0 = Int4                                                 #
+            #       - 1 = Double                                               #
+            #       - 2 = String                                               #
+            #       - 4 = Array of Doubles                                     #
+            #       - 5 = Array of Int4                                        #
+            #   * Value (Type: Per Property Type)                              #
+            #------------------------------------------------------------------#
+                
+            # Check the 'read_properties' flag
+            if read_properties:
+                
+                # Setup a simple Propertie collection (modified dict class) for
+                # accessing the xim image properties after they are read in.
+                #
+                # See PropertiesCollection documentation above for access 
+                # characteristics
+                self.properties = PropertyCollection()
+                
+                # Number Of Properties (Type: Int4)
+                self.number_of_properties, = struct.unpack('<i',f.read(4))
+                
+                # Loop of the number of properties and read them in
+                for p in range(self.number_of_properties):
+                    
+                    # Read property datavalues into dict
+                    #
+                    # NOTE: Not sure if anyone would ever want to use these for
+                    # anything but they are there so I provide them. I also 
+                    # provide a simpler dot (.) access to the value field below. 
+                    _property = {}
+                    
+                    # Property Name Length (Type: Int4)
+                    _property['name_length'], = struct.unpack('<i',f.read(4))
+                    
+                    # Property  Name (Type: Charl x Name Length)
+                    _property['name'], = \
+                        struct.unpack('{}s'.format(_property['name_length']), 
+                                      f.read(_property['name_length'])
+                                      )
+                    _property['name'] = _property['name'].decode('utf-8')
+                    
+                    # Property Type (Type: Int4)
+                    _property['type'], = struct.unpack('<i',f.read(4))
+                    
+                    # Property Value is left as 'None' until type checking can 
+                    # be completed
+                    _property['value'] = None
+    
+                    # Use property 'type' field to decode the property value 
+                    # appropriately
+                    
+                    # Type = Int4
+                    if _property['type'] == 0:
+                        _property['value'], = struct.unpack('<i',f.read(4))                    
+                    
+                    # Type = Double
+                    elif _property['type'] == 1:
+                        _property['value'], = struct.unpack('d',f.read(8))
+                    
+                    # Type = String
+                    elif _property['type'] == 2:
+                        _property['value_length'], = \
+                                                struct.unpack('<i',f.read(4))
+                        
+                        value, = \
+                        struct.unpack('{}s'.format(_property['value_length']), 
+                                      f.read(_property['value_length'])
+                                      )
+
+                        _property['value'] = value.decode('utf-8')
+                    
+                    # Type = Array of Doubles
+                    elif _property['type'] == 4:
+                        _property['value_length'], = \
+                                                struct.unpack('<i',f.read(4))
+
+                        value = np.fromstring(f.read(_property['value_length']), 
+                                              dtype=np.float64)
+
+                        _property['value'] = value 
+                                 
+                    # Type = Array of Int4s
+                    elif _property['type'] == 5:
+                        _property['value_length'], = \
+                                                struct.unpack('<i',f.read(4))
+
+                        value = np.fromstring(f.read(_property['value_length']), 
+                                              dtype=np.int32)
+
+                        _property['value'] = value 
+                    else:
+                        raise ValueError('Property type unknown')
+                    
+                    # Add a property attribute to the collection that is named
+                    # '_property['name']' and points directly to the 
+                    # '_property['value']' for convenience
+                    self.properties[_property['name']] = _property
+                    setattr(self.properties, 
+                            _property['name'], 
+                            _property['value']
+                            )

@@ -1,0 +1,15 @@
+Metadata-Version: 1.0
+Name: sourblossom
+Version: 0.1.1
+Summary: Asynchronous remote procedure call library
+Home-page: https://github.com/smurn/sourblossom
+Author: Stefan C. Mueller
+Author-email: stefan.mueller@fhnw.ch
+License: UNKNOWN
+Description: 
+        
+        sourblossom
+        =============================================================
+        
+        Remote Prodecure Call library using the Twisted framework
+Platform: UNKNOWN

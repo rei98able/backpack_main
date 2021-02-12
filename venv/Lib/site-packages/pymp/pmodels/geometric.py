@@ -1,0 +1,332 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+
+import numpy as np
+from pymp.transforms import (Cyl2Rect, AffineRx, AffineRy, AffineRz, AffineTx, AffineTy, AffineTz)
+
+class PointModel(object):
+    """ Base class that provides and interface for a variety of different models. A subclass should generate a model
+        with coordinates at which you wish extract dose values. These coordinates can be used along with a DICOM dose
+        grid to interpolate the values that fall on the model surface. Once those values are extracted you can determine
+        the mapping from the 3D model to the final visualization geometry be it a plane or some other geometry.
+    """
+
+    @property
+    def homogeneous_coordinates(self):
+        raise NotImplementedError
+
+    @property
+    def cartesian_coordinates(self):
+        raise NotImplementedError
+
+    @property
+    def numpy_coordinates(self):
+        raise NotImplementedError
+
+class OpenCylinder(PointModel):
+    """ Constructs an object that represents an open cylinder (i.e. a cylinder with no end caps). The object generates
+        coordinates on the surface of an open cylinder at which you wish extract dose values. These coordinates can be
+        used along with a DICOM dose grid to interpolate the values that fall on the surface of the open cylinder. Once
+        those values are extracted you can then determine the mapping from the 3D surface to a final visualization
+        geometry such as an unrolled plane.
+
+        The open cylinder is constructed along the z axis starting at the (r, theta, 0) plane and ending at the
+        (r, theta, height) plane. The coordinates therefor are returned in a bottom to top configuration and in order
+        of increasing theta values (i.e. in the counter clockwise direction from the positive x axis) to keep
+        things consistent. When viewing values in 3D this should not impact visualizations. However, in the case of
+        a 2D visualization where coordinates are compressed in the process of "unrolling" the surface of the
+        cylinder, the order of coordinates relative to the position within the viewing plane may need to be flipped
+        or reversed to properly generate a plane of values in the orientation desired.
+    """
+
+    def __init__(self, radius, height, resolution):
+        """ Initialize the OpenCylinder object witht he appropriate parameters
+
+            :param radius: The radius of the open cylinder
+            :param height: The height of the open cylinder
+            :param resolution: The resolution at which to sample the open cylinder surface
+        """
+        self._radius = float(radius)            # Set the internal value for the cylinder radius
+        self._height = float(height)            # Set the internal value for the cylinder height
+        self._resolution = float(resolution)    # Set the internal value for the surface resolution
+        self.__transform_hist = []              # Initialize an empty transform list
+        self.__set_base_coordinates()           # Compute the open cylinder surface point coordinates
+
+    @property
+    def radius(self):
+        """ The property that returns the floating point value for the radius of the open cylinder.
+
+            :return: The floating point value for the radius of the open cylinder
+        """
+        return self._radius
+
+    @radius.setter
+    def radius(self, value):
+        """ The property that sets the floating point value for the radius of the open cylinder.
+
+            :param value: A value that can be coerced to a floating point number
+        """
+        self._radius = float(value)
+        self.__set_base_coordinates()
+
+    @property
+    def height(self):
+        """ The property that returns the floating point value for the height of the open cylinder.
+
+            :return: The floating point value for the height of the open cylinder (z dimension)
+        """
+        return self._height
+
+    @height.setter
+    def height(self, value):
+        """ The property that sets the floating point value for the height of the open cylinder.
+
+            :param value: A value that can be coerced to a floating point number
+        """
+        self._height = float(value)
+        self.__set_base_coordinates()
+
+    @property
+    def resolution(self):
+        """ The property that returns the floating point value for the sampling resolution of the open cylinder.
+
+            :return: The floating point value for the sampling resolution of the open cylinder
+        """
+        return self._resolution
+
+    @resolution.setter
+    def resolution(self, value):
+        """ The property that sets the floating point value for the sampling resolution of the open cylinder.
+
+            :param value: A value that can be coerced to a floating point number
+        """
+        self._resolution = float(value)
+        self.__set_base_coordinates()
+
+    @property
+    def circumference(self):
+        """ The property that returns the floating point value for the circumference of the open cylinder.
+
+            :return: The floating point value for the circumference of the open cylinder
+        """
+        return 2 * np.pi * self.radius
+
+    @property
+    def arc_lengths(self):
+        """ The property that returns the numpy array representing the arc lengths associated with the sampling of the
+            open cylinder fro 0 to circumference with the step size of 'resolution' along the circumference.
+
+            :return: A numpy array with arc lengths along the circumference
+        """
+        return np.arange(0, self.circumference, self.resolution)
+
+    @property
+    def thetas(self):
+        """ The property that returns the numpy array of theta values (in radians) that corresponds to the arc lengths.
+
+            :return: A numpy array of radian measures corresponding to the with arc lengths along the circumference
+        """
+        return (self.arc_lengths / self.radius)  # + (2*np.pi)
+
+    @property
+    def homogeneous_coordinates(self):
+        """ The property that returns the numpy array of homogeneous coordinate values for the points sampled along the
+            open cylinder surface.
+
+            The open cylinder is constructed along the z axis starting at the (r, theta, 0) plane and ending at the
+            (r, theta, height) plane. The coordinates therefor are returned in a bottom to top configuration to keep
+            things consistent. When viewing values in 3D this should not impact visualizations. However, in the case of
+            a 2D visualization where coordinates are compressed in the process of "unrolling" the surface of the
+            cylinder, the order of coordinates relative to the position within the viewing plane may need to be flipped
+            or reversed to properly generate a plane of values in the orientation desired.
+
+            :return: A numpy array of homogeneous coordinate values for the points sampled along the surface.
+        """
+        return self.__coordinates.T
+
+    @property
+    def cartesian_coordinates(self):
+        """ The property that returns the numpy array of Cartesian coordinate values for the points sampled along the
+            open cylinder surface.
+
+            The open cylinder is constructed along the z axis starting at the (r, theta, 0) plane and ending at the
+            (r, theta, height) plane. The coordinates therefor are returned in a bottom to top configuration to keep
+            things consistent. When viewing values in 3D this should not impact visualizations. However, in the case of
+            a 2D visualization where coordinates are compressed in the process of "unrolling" the surface of the
+            cylinder, the order of coordinates relative to the position within the viewing plane may need to be flipped
+            or reversed to properly generate a plane of values in the orientation desired.
+
+            :return: A numpy array of Cartesian coordinate values for the points sampled along the surface.
+        """
+        return self.__coordinates[0:3, ::].T
+
+    @property
+    def numpy_coordinates(self):
+        """ The property that returns the numpy array of numpy ordered coordinate values for the points sampled along
+            the open cylinder surface.
+
+            The open cylinder is constructed along the z axis starting at the (r, theta, 0) plane and ending at the
+            (r, theta, height) plane. The coordinates therefor are returned in a bottom to top configuration to keep
+            things consistent. When viewing values in 3D this should not impact visualizations. However, in the case of
+            a 2D visualization where coordinates are compressed in the process of "unrolling" the surface of the
+            cylinder, the order of coordinates relative to the position within the viewing plane may need to be flipped
+            or reversed to properly generate a plane of values in the orientation desired.
+
+            :return: A numpy array of numpy ordered coordinate values for the points sampled along the surface.
+        """
+        return self.__coordinates[2::-1, ::].T
+
+    def __construct_cyl_coordinates(self):
+        """ Construct the open cylinder coordinates along the z axis starting at the (r, theta, 0) plane and ending at
+            the (r, theta, height) plane. The coordinates therefor are returned in a bottom to top configuration to keep
+            things consistent. Each of the N 3x1 column vectors represents a single point on the cylinder surface.
+
+            :return: A 3xN numpy array of cylindrical coordinates.
+        """
+
+        # Construct an array of coordinates in the z direction from 0 to height in steps or resolution
+        zs = np.arange(0, self.height, self.resolution)
+
+        # Construct the fleshed out numpy.meshgrid like arrays for eah dimension of the coordinate array
+        z = (zs[::, None] + np.zeros_like(self.thetas)).flatten()
+        t = (self.thetas + np.zeros_like(zs[::, None])).flatten()
+        r = (self.radius + np.zeros_like(z[::, None])).flatten()
+
+        # Stack the flattened arrays so that the 3x1 column vectors are in order of (r, theta, z)
+        return np.vstack([r.ravel(), t.ravel(), z.ravel()])
+
+    def __set_base_coordinates(self):
+        """ Converts the cylindrical coordinates to cartesian coordinates then added a 4th row tot he 3x1 column vectors
+            to make them homogeneous coordinates.
+        """
+
+        # Convert the internal representation coordinates from cylindrical coordinates to cartesian coordinates
+        self.__base_coordinates = Cyl2Rect(self.__construct_cyl_coordinates())
+
+        # Add a fourth row of all 1's to the 3xN array of coordinates to make homogeneous coordinates
+        self.__base_coordinates = np.vstack([self.__base_coordinates, np.ones_like(self.__base_coordinates[0])])
+
+        # Compute the final coordinates of the open cylinder surface points
+        self.__compute_final_coordinates()
+
+    def __compute_final_coordinates(self):
+        """ Applies any transformations to the cylinder so that the final set of surface coordinates represent the final
+            desired extraction positions for the open cylinder.
+        """
+
+        # If there are transformations to apply to the open cylinder, construct a single affine transform matrix from
+        # the set of successive transforms to place the the open cylinder into the final extraction geometry
+        if self.__transform_hist:
+            T = None # Initialize the final transform matrix to None
+
+            # For every transform matrix in the _transform history multiply the transformation matrix in the correct
+            # order so that you get a single composite transform matrix.
+            for t in self.__transform_hist:
+                if T is None:
+                    T = t
+                else:
+                    T = t * T
+
+            # Use composite transform matrix to transform the base coordinates
+            self.__coordinates = T * self.__base_coordinates
+        # If there are no transforms to apply simply make the coordinates an exact copy of the base coordinates
+        else:
+            self.__coordinates = self.__base_coordinates.copy('A')
+
+    def reset_coordinates(self):
+        """ Clears and transformations that may have been applied tot he open cylinder model and recomputes the
+            coordinates.
+        """
+        self.__transform_hist = []
+        self.__compute_final_coordinates()
+
+    def rotate_x(self, value, unit='deg'):
+        """ Rotates the open cylinder around he x axis by 'value'. The 'value' parameter can have units of degrees or
+            radians and is designated by the 'unit' parameter as 'deg' or 'rad' respectively.
+
+            :param value: A value that can be coerced to a floating point number that represents the rotation angle in
+                          degrees or radians as noted by the 'unit' parameter.
+            :param unit: The text representation of the units being either 'deg' for degrees or 'rad' for radians
+        """
+        # Add a transformation matrix to the transform history and compute the final coordinates
+        self.__transform_hist.append(AffineRx(value, unit))
+        self.__compute_final_coordinates()
+
+    def rotate_y(self, value, unit='deg'):
+        """ Rotates the open cylinder around he y axis by 'value'. The 'value' parameter can have units of degrees or
+            radians and is designated by the 'unit' parameter as 'deg' or 'rad' respectively.
+
+            :param value: A value that can be coerced to a floating point number that represents the rotation angle in
+                          degrees or radians as noted by the 'unit' parameter.
+            :param unit: The text representation of the units being either 'deg' for degrees or 'rad' for radians
+        """
+        # Add a transformation matrix to the transform history and compute the final coordinates
+        self.__transform_hist.append(AffineRy(value, unit))
+        self.__compute_final_coordinates()
+
+    def rotate_z(self, value, unit='deg'):
+        """ Rotates the open cylinder around he z axis by 'value'. The 'value' parameter can have units of degrees or
+            radians and is designated by the 'unit' parameter as 'deg' or 'rad' respectively.
+
+            :param value: A value that can be coerced to a floating point number that represents the rotation angle in
+                          degrees or radians as noted by the 'unit' parameter.
+            :param unit: The text representation of the units being either 'deg' for degrees or 'rad' for radians
+        """
+        # Add a transformation matrix to the transform history and compute the final coordinates
+        self.__transform_hist.append(AffineRz(value, unit))
+        self.__compute_final_coordinates()
+
+    def translate_x(self, value):
+        """ Translates the open cylinder along he x axis by 'value'. The 'value' parameter is assumed to have the same
+            units as the 'radius' and 'height' parameters used to construct the open cylinder.
+
+            :param value: A value that can be coerced to a floating point number that represents the distance to
+                          translate the open cylinder
+        """
+        # Add a transformation matrix to the transform history and compute the final coordinates
+        self.__transform_hist.append(AffineTx(value))
+        self.__compute_final_coordinates()
+
+    def translate_y(self, value):
+        """ Translates the open cylinder along he y axis by 'value'. The 'value' parameter is assumed to have the same
+            units as the 'radius' and 'height' parameters used to construct the open cylinder.
+
+            :param value: A value that can be coerced to a floating point number that represents the distance to
+                          translate the open cylinder
+        """
+        # Add a transformation matrix to the transform history and compute the final coordinates
+        self.__transform_hist.append(AffineTy(value))
+        self.__compute_final_coordinates()
+
+    def translate_z(self, value):
+        """ Translates the open cylinder along he y axis by 'value'. The 'value' parameter is assumed to have the same
+            units as the 'radius' and 'height' parameters used to construct the open cylinder.
+
+            :param value: A value that can be coerced to a floating point number that represents the distance to
+                          translate the open cylinder
+        """
+        # Add a transformation matrix to the transform history and compute the final coordinates
+        self.__transform_hist.append(AffineTz(value))
+        self.__compute_final_coordinates()

@@ -1,0 +1,133 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+
+#-------------------------------------------------------------------------------
+# Begin Varian BEV Layout
+#-------------------------------------------------------------------------------
+
+                    ##################################E
+                    #               BEV               #
+                    ###################################
+                    #                Y2               #
+                    #  60 -----------------------  60 #
+                    #     :                     :     #
+                    #     :                     :     #
+                    #     :                     :     #
+                    #     :                     :     #
+                    #  X1 :                     : X2  #
+                    # (B) :                     : (A) #
+                    #     :                     :     #
+                    #     :                     :     #
+                    #     :                     :     #
+                    #  1  -----------------------  1  #
+                    #               Y1                #
+                    ###################################
+
+                    # A Bank under X2 A1 toward Y1
+                    # B Bank under X1 B1 toward Y1
+
+#-------------------------------------------------------------------------------
+# End Varian BEV Layout
+#-------------------------------------------------------------------------------
+
+#-------------------------------------------------------------------------------
+# Begin IEC 61217 Scale Layout
+#-------------------------------------------------------------------------------
+
+
+                    ###################################
+                    #                |                #
+                    #     -----------|-----------     #
+                    #     :          |          :     #
+                    #     :          |          :     #
+                    #     :          |          :     #
+                    #     :          |          :     #
+                    #  X1 :          |          : X2  #
+                    #  Y1 :          |          : Y2  #
+                    #     :          |          :     #
+                    #     :          |          :     #
+                    #     :          |          :     #
+                    #     -----------|-----------     #
+                    #                |                #
+                    ###################################
+
+                    #     <--------------------->
+                    #      -1        0        +1  X1,Y1
+                    #      -1        0        +1  X2,Y2
+
+#-------------------------------------------------------------------------------
+# End IEC 61217 Scale Layout
+#-------------------------------------------------------------------------------
+
+#-------------------------------------------------------------------------------
+# Begin Varian and IEC 60601-2-1 Scale Layout
+#-------------------------------------------------------------------------------
+
+
+                    ###################################
+                    #                |                #
+                    #     -----------|-----------     #
+                    #     :          |          :     #
+                    #     :          |          :     #
+                    #     :          |          :     #
+                    #     :          |          :     #
+                    #  X1 :          |          : X2  #
+                    #  Y1 :          |          : Y2  #
+                    #     :          |          :     #
+                    #     :          |          :     #
+                    #     :          |          :     #
+                    #     -----------|-----------     #
+                    #                |                #
+                    ###################################
+
+                    #     <--------------------->
+                    #      +1        0        -1  X1,Y1
+                    #      -1        0        +1  X2,Y2
+
+#-------------------------------------------------------------------------------
+# End Varian and IEC 60601-2-1 Scale Layout
+#-------------------------------------------------------------------------------
+
+class MachineScale(object):
+    '''
+    '''
+    IEC_61217 = 0
+    VARIAN = 1
+    IEC_60601_2_1 = 2
+
+    def __init__(self):
+        m = '''Instantiation of MachineScale instance is not supported'''
+        raise NotImplementedError(m)
+
+class MLCType(object):
+    '''
+    '''
+    VMS80 = 0           # VMS 80 Leaf MLC
+    VMS120 = 2          # VMS 120 Leaf Millennium MLC
+    VMS120HD = 3        # VMS 120 Leaf HD MLC
+
+    def __init__(self):
+        m = '''Instantiation of MLCType instance is not supported'''
+        raise NotImplementedError(m)

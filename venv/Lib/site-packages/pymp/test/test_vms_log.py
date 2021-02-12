@@ -1,0 +1,418 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+Varian Trajectory Log Definitions
+Field definitions for Varian trajectory logs as layed out in the
+"TrueBeam 2.7MR2 Trajectory Log File Specification" found on the myvarian site
+(https://varian.force.com/)
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+import os
+
+import numpy as np
+import pandas as pd
+import pytest
+
+import pymp.vms.log.trajectory as tlog
+from pymp.vms.log.trajectory import VMSTrajectoryLog
+from pymp.vms.log.subbeam import VMSTrajectoryLogSubbeam
+from pymp.vms.log.header import (VMSTrajectoryLogHeader, 
+                                 VMSTrajectoryLogSubbeamHeader)
+from pymp.vms.log.definitions import (SPECIFICATION_MAP, Axis, AXIS_ENUM, 
+                                      AXIS_SCALE_ENUM, MLC_ENUM, EndEffect, 
+                                      MetaData)
+
+## START: GLOBALS ##
+RESOURCES_IN = 'data'
+
+ROOT_DIR = os.path.split(os.getcwd())[0]  # Directory of test file
+RESOURCE_DIR = ROOT_DIR + os.path.sep + RESOURCES_IN + os.path.sep
+
+# v3.0 trajectory log with no associated .txt file (not truncated)
+NO_TXT_FILE_v3 = RESOURCE_DIR + 'PHY25MR2_TestPlan_02_20150604142614.bin'
+LOGv3_NO_TXT = VMSTrajectoryLog(NO_TXT_FILE_v3)
+
+# v3.0 trajectory log with associated .txt file (not truncated)
+WITH_TXT_FILE_v3 = RESOURCE_DIR + 'PHY25MR2_TestPlan_01_20150604142614.bin'
+EXPECTED_TXT_FILE_v3 = RESOURCE_DIR + 'PHY25MR2_TestPlan_01_20150604142614.txt'
+LOGv3 = VMSTrajectoryLog(WITH_TXT_FILE_v3)
+
+# v4.0 trajectory log with no associated .txt file (not truncated)
+NO_TXT_FILE_v4 = RESOURCE_DIR + 'PHY27MR2_TestPlan_03_20180830154128.bin'
+LOGv4_NO_TXT = VMSTrajectoryLog(NO_TXT_FILE_v4)
+## END: GLOBALS ##
+
+
+def test_resource_version_compatibility():
+    ''' Test to make sure the sample files are of equal or lesser version to the 
+        VMSTrajectoryLog pakage to ensure support prior to testing. 
+    '''
+
+    # Check and make sure the version is in the SPECIFICATION_MAP indicating 
+    # support for this version. Then verify the version of the file is at or 
+    # below the version package. Package version will mimic the Varian file 
+    # version for clarity.
+
+    # v3.0 Test
+    assert float(LOGv3.header.version) == 3.0
+    assert float(LOGv3.header.version) in SPECIFICATION_MAP
+    assert float(LOGv3.header.version) <= float(tlog.__version__)
+
+    # v4.0 Test
+    assert float(LOGv4_NO_TXT.header.version) == 4.0
+    assert float(LOGv4_NO_TXT.header.version) in SPECIFICATION_MAP
+    assert float(LOGv4_NO_TXT.header.version) <= float(tlog.__version__)
+
+
+def test_no_txt_file_attributes():
+    ''' Test that the 'txt' atribute on the log is poperly set to None if no 
+        .txt. file is found.
+    '''
+    # If there is no associated .txt file the 'txt' attibute should be None
+    assert LOGv3_NO_TXT.txt is None
+    assert LOGv4_NO_TXT.txt is None
+
+    # If there is no associated .txt file the 'filename_txt' attibute should be 
+    # None
+    assert LOGv3_NO_TXT.filename_txt is None
+    assert LOGv4_NO_TXT.filename_txt is None
+
+    # The 'filename_bin' attribute should still be properly set
+    assert LOGv3_NO_TXT.filename_bin == NO_TXT_FILE_v3
+    assert LOGv4_NO_TXT.filename_bin == NO_TXT_FILE_v4
+
+
+def test_with_txt_file_attributes():
+    ''' Test that the 'filename_bin' atribute on the log is poperly set to the 
+        log file path.
+    '''
+    # The 'filename_bin' attribute should still be properly set
+    assert LOGv3.filename_bin == WITH_TXT_FILE_v3
+
+    # The 'filename_txt' attribute should still be properly set
+    assert LOGv3.filename_txt == EXPECTED_TXT_FILE_v3
+
+    # The 'txt' attribute should be a dict of {str:str} pairs
+    for k, v in LOGv3.txt.items():
+        assert type(k) is str
+        assert type(v) is str
+
+
+def test_VMSTrajectoryLogHeader():
+    ''' Test all the types for the VMSTrajectoryLog header and its properties 
+        based on the "TrueBeam Trajectory Log File Specification". Also 
+        checks to make sure the values are internally consistent with the data.
+    '''
+    # Should beno surprises on these 2
+    assert type(LOGv3.header) is VMSTrajectoryLogHeader  # Check header type
+    assert type(LOGv3.header.vms_tlog) is VMSTrajectoryLog  # Parent object type
+
+    ## Now checkVMSTrajectoryLog  header properties ##
+
+    # Check that the vms_tlog attribute points back to the parent object
+    assert LOGv3.header.vms_tlog is LOGv3
+
+    # Check file signature type and value (specified in the Varian file 
+    # specification)
+    assert type(LOGv3.header.signature) is str and \
+           LOGv3.header.signature == u'VOSTL'
+
+    # Check the file version is supported (already done above but keeping header
+    # information together so we will do it again)
+    assert float(LOGv3.header.version) in SPECIFICATION_MAP
+    assert float(LOGv3.header.version) <= float(tlog.__version__)
+
+    # Check the header size (fixed at 1024 for now)
+    assert LOGv3.header.size == 1024
+
+    # Check sample interval is 20 (ms) (specified in the Varian file 
+    # specivifaction)
+    assert LOGv3.header.sample_interval == 20
+
+    # Check to make sure the header.num_axes value matches the primary axes 
+    # count on the log object as well as on the recarray view
+    log_primary_axes = [n for n, a in LOGv3.__dict__.items() if type(a) == Axis]
+    assert LOGv3.header.num_axes == len(log_primary_axes)
+
+    dtype_primary_axes = LOGv3.dtype.fields.keys()
+    assert LOGv3.header.num_axes == len(dtype_primary_axes)
+
+    # Make sure the axis_enum is of the same length as the primary axes and that
+    # all of the enumerated values are in the AXIS_ENUM as specified in the
+    # Varian file specification.
+    assert len(LOGv3.header.axis_enum) == len(log_primary_axes)
+    for i in LOGv3.header.axis_enum:
+        assert i in AXIS_ENUM
+
+    # Check the length of the samples_per_axis array matches the number of axes
+    # Then check that the raw data column dimension matches the sum of the array
+    # times 2 (for the expected and actual values per sample)
+    assert len(LOGv3.header.samples_per_axis) == len(log_primary_axes)
+    assert np.sum(LOGv3.header.samples_per_axis) * 2 == \
+                                                    LOGv3.snapshots.shape[-1]
+    assert np.sum(LOGv3.header.samples_per_axis) * 2 == \
+                                                    LOGv3.dataframe.shape[-1]
+
+    # Check axis scale enum is in AXIS_SCAL_ENUM map from (Varian file 
+    # specification)
+    assert LOGv3.header.axis_scale in AXIS_SCALE_ENUM
+
+    # Check to make sure the number of subbeams is correct for the known value
+    # (i.e. 2) in the sample files.
+    #
+    # TODO: Add a second sample file with only 1 beam
+    assert LOGv3.header.num_subbeams == 2
+
+    # Check the truncated enum value against known value for the sample file 
+    # (i.e. 0)
+    assert LOGv3.header.is_truncated == 0
+
+    # Check the header.num_snapshots matches row dimension of the snapshots and
+    # other data views.
+    assert LOGv3.header.num_snapshots == LOGv3.snapshots.shape[0]
+    assert LOGv3.header.num_snapshots == LOGv3.recarray.shape[0]
+    assert LOGv3.header.num_snapshots == LOGv3.dataframe.shape[0]
+
+    # Check to make sure the MLC enum value is located in the MLC_ENUM as
+    # specified in the Varian file specification.
+    assert LOGv3.header.mlc_model in MLC_ENUM
+
+    # Just check that the reserved section is available v3.0 trajectory logs
+    assert hasattr(LOGv3.header, 'reserved')
+
+    #########################################################################
+    # Check metadata attribute values (introduced in v4.0 and added to the  #
+    # reserved section) and make sure it is set to 'None' for previous      #
+    # versions of the trajectory logs (i.e. < 4.0)                          #
+    #########################################################################
+    
+    # Versions prior to v4.0 in this case v3.0 should be None
+    assert LOGv3.header.metadata is None
+
+    # For a v4.0 file should be a MetaData object
+    assert type(LOGv4_NO_TXT.header.metadata) is MetaData
+
+    # Check metadata.patient_id type
+    assert type(LOGv4_NO_TXT.header.metadata.patient_id) is str
+
+    # Check metadata.plan_name type
+    assert type(LOGv4_NO_TXT.header.metadata.plan_name) is str
+
+    # Check metadata.sop_instance_uid type
+    assert type(LOGv4_NO_TXT.header.metadata.sop_instance_uid) is str
+
+    # Check metadata.planned_mu type
+    assert type(LOGv4_NO_TXT.header.metadata.planned_mu) is float
+
+    # Check metadata.remaining_mu type
+    assert type(LOGv4_NO_TXT.header.metadata.remaining_mu) is float
+
+    # Check metadata.energy type
+    assert type(LOGv4_NO_TXT.header.metadata.energy) is str
+
+    # Check metadata.beam_name type
+    assert type(LOGv4_NO_TXT.header.metadata.beam_name) is str
+
+
+def test_VMSTrajectoryLogSubbeamHeader():
+    ''' Test all the types for the VMSTrajectoryLogSubbeam header and its 
+        properties based on the "TrueBeam Trajectory Log File Specification". 
+        Also checks to make sure the values are internally consistent with the 
+        data.
+    '''
+    # First just check to see if the log has the subbeams list
+    assert hasattr(LOGv3, 'subbeams')
+
+    # Grab a subbeam any subbeam and check its type
+    sub = LOGv3.subbeams[0]
+    assert type(sub) is VMSTrajectoryLogSubbeam
+
+    # Check to see if it has a header and it is the right type
+    assert hasattr(sub, 'header')
+    assert type(sub.header) is VMSTrajectoryLogSubbeamHeader
+
+    ## Begin checking the header attributes ##
+
+    # Check the type of the subbeam attribute (should be no surpises here)
+    assert type(sub.header.subbeam) is VMSTrajectoryLogSubbeam
+
+    # Make sure the subbeam attriute points back to the parent subbeam
+    assert sub.header.subbeam is sub
+
+    # Check the control point type and value
+    assert type(sub.header.control_point) is int
+    assert sub.header.control_point == 0  # First subbeam should start at 0
+
+    # Check monitor_units type
+    assert type(sub.header.monitor_units) is float
+
+    # Check rad time
+    assert type(sub.header.rad_time) is float
+
+    # Check sequence number and type
+    assert sub.header.seq_num == 0  # We grabed the first beam
+    assert type(sub.header.seq_num) is int
+
+    # Check name type
+    assert type(sub.header.name) is str
+
+    # Just check that the reserved section is available
+    assert hasattr(sub.header, 'reserved')
+
+
+def test_VMSTrajectoryLog_data_views():
+    ''' Tests the synchronization of the various views of the snapshots on the 
+        same memory block. Will test setting a value on the 'snapshots' 
+        attribute and verify it through both the 'dataframe' and 'recarray' 
+        views of the raw numpy array. 
+    '''
+
+    log = VMSTrajectoryLog(WITH_TXT_FILE_v3)
+
+    # The snapshots are readonly due to use of the numpy.frombuffer to read it 
+    # in so assignment isn't supported so we check all values for now. If you
+    # want to make it so that snapshots are able to be assigned to you can use 
+    # the .copy('A') option at the end of the frombuffer method used to read in 
+    # the 1D array of snapshot values (see note starting on line 170 of 
+    # tajectory.py)
+    assert np.array_equal(log.snapshots[::, 0:1], 
+                          log.recarray['CollRtn']['expected'])
+    assert np.array_equal(log.dataframe.CollRtn.expected.values, 
+                          log.snapshots[::, 0])
+    assert np.array_equal(log.CollRtn.snapshots, log.snapshots[::, 0:2])
+
+    # NOTE: Uncomment out below ONLY if you choose to use ".copy('A')" at the 
+    #       end of the np.frombuffer method used to read in the 1D array of 
+    #       snapshot values (see note starting on line 170 of tajectory.py)
+    #       otherwise it will fail with a ValueError because when using 
+    #       numpy.frombuffer without copy the snapshots are readonly
+
+    # log.snapshots[0, 0] = 9999  # Should change everywhere
+
+    # assert log.snapshots[0, 0] == log.recarray['CollRtn']['expected'][0][0]
+    # assert log.dataframe.CollRtn.expected[0] == log.snapshots[0, 0]
+    # assert log.CollRtn.snapshots[0, 0] == log.snapshots[0, 0]
+
+
+def test_VMSTrajectoryLogSubbeam_data_views():
+    ''' Tests the synchronization of the various views of the snapshots on the 
+        same memory block. Will test setting a value on the subbeams 'snapshots' 
+        attribute and verify it through both the 'dataframe' and 'recarray' 
+        views of the raw numpy array. 
+    '''
+
+    log = VMSTrajectoryLog(WITH_TXT_FILE_v3)
+    sub = log.subbeams[0]
+
+    # The snapshots are readonly due to use of the numpy.frombuffer to read it 
+    # in so assignment isn't supported so we check all values for now. If you
+    # want to make it so that snapshots are able to be assigned to you can use 
+    # the .copy('A') option at the end of the frombuffer command used to read in 
+    # the 1D array of snapshot values (see note starting on line 170 of 
+    # tajectory.py)
+    assert np.array_equal(sub.snapshots[::, 0:1], 
+                          sub.recarray['CollRtn']['expected'])
+    assert np.array_equal(sub.dataframe.CollRtn.expected.values, 
+                          sub.snapshots[::, 0])
+    assert np.array_equal(sub.CollRtn.snapshots, sub.snapshots[::, 0:2])
+
+    # NOTE: Uncomment out below ONLY if you choose to use ".copy('A')" at the 
+    #       end of the np.frombuffer method used to read in the 1D array of 
+    #       snapshot values (see note starting on line 170 of tajectory.py)
+    #       otherwise it will fail with a ValueError because when using 
+    #       numpy.frombuffer without copy the snapshots are readonly
+
+    # sub.snapshots[0, 0] = 9999  # Should change everywhere
+
+    # assert sub.snapshots[0, 0] == sub.recarray['CollRtn']['expected'][0][0]
+    # assert sub.dataframe.CollRtn.expected[0] == sub.snapshots[0, 0]
+    # assert sub.CollRtn.snapshots[0, 0] == sub.snapshots[0, 0]
+
+
+def test_VMSTrajectoryLogSubbeam_attributes():
+    '''
+    '''
+    sub = LOGv3.subbeams[0]
+
+    # Check the vms_tlog attribute is the parrent log file
+    assert sub.vms_tlog is LOGv3
+
+    # Check the type of the header.
+    assert type(sub.header) is VMSTrajectoryLogSubbeamHeader
+
+    # Check the types of the start and stop index attributes
+    assert type(sub.start) is int
+    assert type(sub.stop) is int
+
+    # Check the end_effect attribute type
+    assert type(sub.end_effect) is EndEffect
+
+    # Check the return types for the start and end attributes on the
+    # end_effect attribute
+    assert type(sub.end_effect.start) == tuple
+    assert type(sub.end_effect.start[0]) is type(np.array([]))
+    assert type(sub.end_effect.end) == tuple
+    assert type(sub.end_effect.end[0]) == type(np.array([]))
+
+    # Check that setting the end_effect 'start' and 'end' properties raises
+    # a ValueError when not a proper index tuple.
+    def set_end_effect_start_wrong_type(sub):
+        sub.end_effect.start = []
+
+    def set_end_effect_end_wrong_type(sub):
+        sub.end_effect.start = []
+
+    with pytest.raises(ValueError):
+        set_end_effect_start_wrong_type(sub)
+
+    with pytest.raises(ValueError):
+        set_end_effect_end_wrong_type(sub)
+
+
+def test_VMSTrajectoryLog_attributes():
+    '''
+    '''
+    # For each enumerated axis look for an attribute that is an Axis 
+    # object on the parent VMSTrajectoryLog
+    for i in LOGv4_NO_TXT.header.axis_enum:
+        name = AXIS_ENUM[i]
+        # Check to see that there is an attribute withthe axis name
+        assert hasattr(LOGv4_NO_TXT, name)
+        
+        # Make sure the axis is of type Axis
+        axis = getattr(LOGv4_NO_TXT, name)
+        assert type(axis) is Axis
+
+        ## Check the axis attributes ##
+        # First make sure the axis has a snapshots numpy.ndarray        
+        assert hasattr(axis, 'snapshots')
+        assert type(getattr(axis, 'snapshots')) is np.ndarray
+
+        # Make sure the axis has a expected numpy.ndarray        
+        assert hasattr(axis, 'expected')
+        assert type(getattr(axis, 'expected')) is np.ndarray
+
+        # Make sure the axis has a actual numpy.ndarray        
+        assert hasattr(axis, 'actual')
+        assert type(getattr(axis, 'actual')) is np.ndarray
+

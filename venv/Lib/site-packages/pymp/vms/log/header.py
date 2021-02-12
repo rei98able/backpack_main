@@ -1,0 +1,627 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of 
+this software and associated documentation files (the "Software"), to deal in 
+the Software without restriction, including without limitation the rights to 
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of 
+the Software, and to permit persons to whom the Software is furnished to do so, 
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all 
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS 
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR 
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER 
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Varian Trajectory Log Definitions
+Field definitions for Varian trajectory logs as layed out in the "TrueBeam 
+2.7MR2 Trajectory Log File Specification" found on the myvarian site
+(https://varian.force.com/)
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+# Standard python imports
+import struct
+import io
+
+# Third party imports
+import numpy as np
+
+# Local imports.
+from .definitions import MetaData
+        
+      
+class VMSTrajectoryLogHeader(object):
+    ''' Simple object that parses out, stores, and provides 'get' access to the 
+        'header' information for a VMSTrajectoryLog. The simplistic 'readonly'
+        access provided by the properties is used to discourage setting these 
+        values by mistake using the simple assignment operator '=' during use.
+        These values are used in a number of other parsing fuctions to determine 
+        the number of bytes to read in as well as the shape of the resulting 
+        numpy arrays and dtypes so changing them is not recomended.
+        
+        Currently there is no reason to write a trajectory log within the Varian 
+        framework as they are very simple diagnostic tools. With that in mind 
+        assignment to these attributes with the intent to write out later is not 
+        supported at this time.
+    '''
+    
+    #--------------------------------------------------------------------------
+    # 'object' interface code   
+    #--------------------------------------------------------------------------        
+    def __init__(self, vms_log, _file):
+        ''' Standard initialization function for VMSTrajectoryLogHeader object 
+        
+            Parameters
+            ----------
+            vms_log : VMSTrajectoryLog
+                The VMSTrajectoryLog representing the Varian Trajectory Log file 
+                being processed and the one this subbeam belongs to.
+
+            _file : File
+                An open binary file stream representing the Varian Trajectory 
+                Log.
+            
+            Sets
+            ----
+            vms_log : VMSTrajectoryLog
+                The VMSTrajectoryLog representing the Varian Trajectory Log file 
+                being processed and the one this subbeam belongs to.
+        '''
+
+        # Set the '_vms_log' attribute to point to the parent VMSTrajectoryLog.
+        self._vms_tlog = vms_log
+
+        # Parse out the header information from the open trajectory log file 
+        # stream.
+        self._parse(_file)
+        
+    #--------------------------------------------------------------------------
+    # 'VMSTrajectoryLogHeader' Private Methods  
+    #--------------------------------------------------------------------------
+        
+    def _parse(self, _file):
+        ''' Method used to parse the Varian Trajectory Log Header into its 
+            various components.
+        
+            Parameters
+            ----------
+            _file : File
+                An open binary file stream representing the Varian Trajectory 
+                Log
+                
+            Sets
+            ----
+            signature : str
+                The utf-8 string representing the file signature as described in 
+                the "TrueBeam 2.7MR2 Trajectory Log File Specification." The
+                expected value is 'VOSTL' and is used to determine if the file
+                is of the appropriate type.
+                
+            version : str
+                The utf-8 string representing the file version.
+                
+            size : int
+                An integer representing the size of the header in bytes.
+                
+            sample_interval : int
+                An integer representing the time interval of the samples in (ms)
+                
+            num_axes : int
+                An integer representing the number of axes reported on.
+                
+            axis_enum : numpy.array
+                A numpy.array of interger values representing the enum values of 
+                the axes reported on and their order.
+                
+            samples_per_axis : numpy.array
+                A numpy.array of interger values representing the number of 
+                samples per axis in the same order as the axis_enum.
+                
+            axis_scale : int
+                An integer enum value representing the scale used for the log 
+                (i.e. Machine Scale or Modified IEC 61217).
+                
+            num_subbeams : int
+                An integer indicating the number of subbeams in the log file.
+                
+            is_truncated : int
+                A flag (integer 0 or 1) indicating if the file was truncated.
+                
+            num_snapshots : int
+                An integer indicating the number of snapshots in the log file.
+                
+            mlc_model : int
+                An integer enum value representing the MLC model used during 
+                delivery.
+                
+            reserved : str or bytes
+                A string (Python 2.x) or series of bytes (Python 3.x) 
+                representing the unused portion of the header. In this case the 
+                actual object is left in the version specific format to make
+                future desired manipulation by the end user transparent.    
+        ''' 
+        # File signature 
+        s, = struct.unpack('16s', _file.read(16))
+        s = s.decode('utf-8')
+        self._signature = s.strip('\x00')
+        
+        # File version
+        v, = struct.unpack('16s', _file.read(16))
+        v = v.decode('utf-8')
+        self._version = v.strip('\x00')
+
+        # The size of the header in bytes (shouldbe 1024)
+        self._size, = struct.unpack('<i', _file.read(4))
+        
+        # The sample interval in ms
+        self._sample_interval, = struct.unpack('<i', _file.read(4))
+        
+        # The number of axes reported on
+        self._num_axes, = struct.unpack('<i', _file.read(4))
+        
+        # An array of enum values representing the axes and their order
+        # self._axis_enum = np.fromstring(_file.read(self._num_axes * 4), 
+        #                                 dtype='i4')
+
+        self._axis_enum = np.frombuffer(_file.read(self._num_axes * 4), 
+                                        dtype='i4')
+                                        
+        # An array representing the number of samples for each axis (in order)
+        # self._samples_per_axis = np.fromstring(_file.read(self._num_axes * 4), 
+        #                                        dtype='i4')
+
+        self._samples_per_axis = np.frombuffer(_file.read(self._num_axes * 4), 
+                                               dtype='i4')
+                                               
+        # The enum representing the scale used for the log (i.e. Machine Scale 
+        # or Modified IEC 61217)
+        self._axis_scale, = struct.unpack('<i', _file.read(4))
+        
+        # The number of subbeams recorded in the file
+        self._num_subbeams, = struct.unpack('<i', _file.read(4))
+        
+        # Flag indicating if the file was truncated
+        self._is_truncated, = struct.unpack('<i', _file.read(4))
+        
+        # The total number of snapshots in the trajectory log
+        self._num_snapshots, = struct.unpack('<i', _file.read(4))
+        
+        # The enum value representing the MLC model used in delivery
+        self._mlc_model, = struct.unpack('<i', _file.read(4))
+        
+        if float(self._version) <= 3.0:
+            # The unused portion of the header 
+            self._reserved = \
+                            _file.read(self._size - (64 + (self._num_axes * 8)))
+            self._metadata = None # Only introduced in versions <= 4.0
+        else:
+            # The unused portion of the header 
+            self._reserved = \
+                            _file.read(self._size - (64 + (self._num_axes * 8)))
+
+            # Set as BytesIO stream
+            raw_bytes = io.BytesIO(self._reserved)
+
+            # Strip off unused reserve space to keep metadata section only
+            metadata = self._reserved.rstrip(b'\x00')
+
+            # Set the storage object for the metadata in version > 4.0 files
+            self._metadata = MetaData(metadata)
+            
+            # Set the _reserved attribute of the header to what is left after 
+            # the metedata section is read in.
+            raw_bytes.seek(len(metadata)) # Seek to end of metadata
+            self._reserved = raw_bytes.read() # Read in remaining reserved space
+
+
+    #--------------------------------------------------------------------------
+    # 'VMSTrajectoryLogHeader' Public Methods  
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    # VMSTrajectoryLogHeader Properties  
+    #--------------------------------------------------------------------------
+    
+    @property
+    def vms_tlog(self):
+        ''' Provides 'readonly' or 'get' access to the '_vms_tlog' private 
+            attribute.
+
+            Returns
+            -------
+            VMSTrajectoryLog
+                The VMSTrajectoryLog representing the Varian Trajectory Log that 
+                this subbeam belongs to.
+        '''
+        return self._vms_tlog
+        
+    @property
+    def signature(self):
+        ''' Provides 'readonly' or 'get' access to the _signature private 
+            attribute.
+
+            Returns
+            -------
+            str
+                The utf-8 string representing the file signature as described in 
+                the "TrueBeam 2.7MR2 Trajectory Log File Specification." The
+                expected value is 'VOSTL' and is used to determine if the file
+                is of the appropriate type.
+        '''
+        return self._signature
+
+    @property
+    def version(self):
+        ''' Provides 'readonly' or 'get' access to the _version private 
+            attribute.
+
+            Returns
+            -------
+            str
+                The utf-8 string representing the file version.
+        '''
+        return self._version
+    
+    @property
+    def size(self):
+        ''' Provides 'readonly' or 'get' access to the _size private attribute.
+
+            Returns
+            -------
+            int
+                An integer representing the size of the header in bytes.
+        '''
+        return self._size
+    
+    @property        
+    def sample_interval(self):
+        ''' Provides 'readonly' or 'get' access to the _sample_interval private 
+            attribute.
+
+            Returns
+            -------
+            int
+                An integer representing the time interval of the samples 
+                in (ms).
+        '''
+        return self._sample_interval
+
+    @property        
+    def num_axes(self):
+        ''' Provides 'readonly' or 'get' access to the _num_axes private 
+            attribute.
+
+            Returns
+            -------
+            int
+                An integer representing the number of axes reported on.
+        '''
+        return self._num_axes
+
+    @property        
+    def axis_enum(self):
+        ''' Provides 'readonly' or 'get' access to the _axis_enum private 
+            attribute.
+
+            Returns
+            -------
+            numpy.array
+                A numpy.array of interger values representing the enum values of 
+                the axes reported on and their order.
+        '''
+        return self._axis_enum
+
+    @property        
+    def samples_per_axis(self):
+        ''' Provides 'readonly' or 'get' access to the _samples_per_axis private 
+            attribute.
+
+            Returns
+            -------
+            numpy.array
+                A numpy.array of interger values representing the number of 
+                samples per axis in the same order as the axis_enum.
+        '''
+        return self._samples_per_axis
+
+    @property        
+    def axis_scale(self):
+        ''' Provides 'readonly' or 'get' access to the _axis_scale private 
+            attribute.
+
+            Returns
+            -------
+            int
+                An integer enum value representing the scale used for the log 
+                (i.e. Machine Scale or Modified IEC 61217).
+        '''
+        return self._axis_scale
+
+    @property        
+    def num_subbeams(self):
+        ''' Provides 'readonly' or 'get' access to the _num_subbeams private 
+            attribute.
+
+            Returns
+            -------
+            int
+                An integer indicating the number of subbeams in the log file.
+        '''
+        return self._num_subbeams
+        
+    @property        
+    def is_truncated(self):
+        ''' Provides 'readonly' or 'get' access to the _is_truncated private 
+            attribute.
+
+            Returns
+            -------
+            int
+                A flag (integer 0 or 1) indicating if the file was truncated.
+        '''
+        return self._is_truncated
+
+    @property        
+    def num_snapshots(self):
+        ''' Provides 'readonly' or 'get' access to the _num_snapshots private 
+            attribute.
+
+            Returns
+            -------
+            int
+                An integer indicating the number of snapshots in the log file.
+        '''
+        return self._num_snapshots
+
+    @property        
+    def mlc_model(self):
+        ''' Provides 'readonly' or 'get' access to the _mlc_model private 
+            attribute.
+
+            Returns
+            -------
+            int
+                An integer enum value representing the MLC model used during 
+                delivery.
+        '''
+        return self._mlc_model
+
+    @property
+    def metadata(self):
+        ''' Provides 'readonly' or 'get' access to the _metadata private 
+            attribute.
+
+            Returns
+            -------
+            MetaData or None
+                MetaData Structure for Varian trajectory files of version 4.0+
+                as outlined in the "TrueBeam 2.7MR2 Trajectory Log File 
+                Specification" or None for Varian trajectory files of version 
+                <= 3.0.
+        '''
+        return self._metadata
+
+    @property        
+    def reserved(self):
+        ''' Provides 'readonly' or 'get' access to the _reserved private 
+            attribute.
+
+            Returns
+            -------
+            str or bytes
+                A string (Python 2.x) or series of bytes (Python 3.x) 
+                representing the unused portion of the header. In this case the 
+                actual object is left in the version specific format to make
+                future desired manipulation by the end user transparent. 
+        '''
+        return self._reserved
+    
+class VMSTrajectoryLogSubbeamHeader(object):
+    ''' Simple object that parses out, stores, and provides 'get' access to the 
+        subbeam header structure for a VMSTrajectoryLog. The simplistic 
+        'readonly' access provided by the properties is used to discourage 
+        setting these values by mistake using the simple assignment operator '=' 
+        during use. These values are used in a number of calculation fuctions 
+        to determine the accuracy of delivery so changing them is not recomended
+        
+        Currently there is no reason to write a trajectory log within the Varian 
+        framework as they are very simple diagnostic tools. With that in mind 
+        assignment to these attributes with the intent to write out later is not 
+        supported at this time.
+    '''
+    
+    #--------------------------------------------------------------------------
+    # 'object' interface code   
+    #--------------------------------------------------------------------------        
+    def __init__(self, subbeam, _file):
+        ''' Standard initialization function for VMSTrajectoryLogSubbeamHeader 
+            object 
+        
+            Parameters
+            ----------
+            subbeam : VMSTrajectoryLogSubbeam
+                Simple storage object that parses out, stores, and provides 
+                'get'access to the subbeam information for a VMSTrajectoryLog.
+
+            _file : File
+                An open binary file stream representing the Varian Trajectory 
+                Log.
+            
+            Sets
+            ----
+            vms_log : VMSTrajectoryLog
+                The VMSTrajectoryLog representing the Varian Trajectory Log file 
+                being processed and the one this subbeam belongs to.
+        '''
+        # Set the "_subbeam" attribute to the parent VMSTrajectoryLogSubbeam 
+        # object
+        self._subbeam = subbeam
+
+        # Parse out the VMSTrajectoryLogSubbeam structure information into the 
+        # header for the subbeam object from the open trajectory log file stream
+        # Structure follows that layed out in the "TrueBeam 2.7MR2 Trajectory 
+        # Log File Specification" 
+        self._parse(_file)
+        
+    #--------------------------------------------------------------------------
+    # 'VMSTrajectoryLogSubbeam' Private Methods  
+    #--------------------------------------------------------------------------
+        
+    def _parse(self, _file):
+        ''' Method used to parse the Varian Trajectory Log Subbeams into their
+            various components.
+        
+            Parameters
+            ----------
+            _file : file
+                An open binary file stream representing the Varian Trajectory 
+                Log
+                
+            Sets
+            ----
+            control_point : int
+                An integer representing the control point at which the subbeam 
+                starts.
+                
+            monitor_units : float
+                A float representing number of monitor units planned for the 
+                subbeam
+                
+            rad_time : float
+                A float representing the expected irradiation time for the 
+                subbeam in seconds
+                
+            seq_num : int
+                An integer representing the sequence number of the subbeam
+                
+            name : str
+                The utf-8 string representing the name of the subbeam.
+                
+            reserved : str or bytes
+                A 'str' (Python 2.x) or series of 'bytes' (Python 3.x) 
+                representing the 32 bytes of unused preallocated space for 
+                each subbeam.
+        '''
+        # The control point where the subbeam starts
+        self._control_point, = struct.unpack('<i', _file.read(4))
+        
+        # The number of monitor units planned for the subbeam
+        self._monitor_units, = struct.unpack('<f', _file.read(4))
+        
+        # Expected irradiation time for the subbeam in seconds
+        self._rad_time, = struct.unpack('<f', _file.read(4))
+        
+        # Sequence number of the subbeam
+        self._seq_num, = struct.unpack('<i', _file.read(4))
+
+        # Subbeam name
+        n, = struct.unpack('512s', _file.read(512))
+        n = n.decode('utf-8')
+        self._name = n.strip('\x00')
+
+        # Unused 32 bytes of the preallocated space for each subbeam
+        self._reserved = _file.read(32)
+
+    #--------------------------------------------------------------------------
+    # 'VMSTrajectoryLogHeader' Public Methods  
+    #--------------------------------------------------------------------------
+    
+    #--------------------------------------------------------------------------
+    # VMSTrajectoryLogSubbeam Properties  
+    #--------------------------------------------------------------------------
+    
+    @property
+    def subbeam(self):
+        ''' Provides 'readonly' or 'get' access to the _subbeam private 
+        attribute.
+
+            Returns
+            -------
+            VMSTrajectoryLogSubbeam
+                The VMSTrajectoryLogSubbeam representing the subbeam within the 
+                Varian Trajectory Log that this subbeam header belongs to.
+        '''
+        return self._subbeam
+
+    @property
+    def control_point(self):
+        ''' Provides 'readonly' or 'get' access to the _control_point private 
+            attribute.
+
+            Returns
+            -------
+            int
+                An integer representing the control point at which the subbeam 
+                starts.
+        '''
+        return self._control_point
+
+    @property        
+    def monitor_units(self):
+        ''' Provides 'readonly' or 'get' access to the _monitor_units private 
+            attribute.
+
+            Returns
+            -------
+            float
+                A float representing number of monitor units planned for the 
+                subbeam
+        '''
+        return self._monitor_units
+
+    @property        
+    def rad_time(self):
+        ''' Provides 'readonly' or 'get' access to the _rad_time private 
+            attribute.
+
+            Returns
+            -------
+            float
+                A float representing the expected irradiation time for the 
+                subbeam in seconds
+        '''
+        return self._rad_time
+
+    @property        
+    def seq_num(self):
+        ''' Provides 'readonly' or 'get' access to the _seq_num private 
+            attribute.
+
+            Returns
+            -------
+            int
+                An integer representing the sequence number of the subbeam
+        '''
+        return self._seq_num
+
+    @property        
+    def name(self):
+        ''' Provides 'readonly' or 'get' access to the _name private attribute.
+
+            Returns
+            -------
+            str
+                The utf-8 string representing the name of the subbeam.
+        '''
+        return self._name
+
+    @property        
+    def reserved(self):
+        ''' Provides 'readonly' or 'get' access to the _reserved private 
+            attribute.
+
+            Returns
+            -------
+            str or bytes
+                A 'str' (Python 2.x) or series of 'bytes' (Python 3.x) 
+                representing the 32 bytes of unused preallocated space for 
+                each subbeam.
+        '''
+        return self._reserved

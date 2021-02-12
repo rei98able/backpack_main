@@ -1,0 +1,1317 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+import os
+
+import numpy as np
+import pytest
+
+from pymp.frames import NDRefFrame, NDRefLocator
+from pymp.frames.base import LinearCoordinateMapper
+
+## START: GLOBALS ##
+RESOURCES_IN = '__resources__'
+
+ROOT_DIR = os.path.split(os.getcwd())[0]  # Directory of test file
+RESOURCE_DIR = ROOT_DIR + os.path.sep + RESOURCES_IN + os.path.sep
+
+# Construct an array of evenvalues for early tests
+#
+# array([[ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9],
+#        [10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+#        [20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+#        [30, 31, 32, 33, 34, 35, 36, 37, 38, 39],
+#        [40, 41, 42, 43, 44, 45, 46, 47, 48, 49],
+#        [50, 51, 52, 53, 54, 55, 56, 57, 58, 59],
+#        [60, 61, 62, 63, 64, 65, 66, 67, 68, 69],
+#        [70, 71, 72, 73, 74, 75, 76, 77, 78, 79],
+#        [80, 81, 82, 83, 84, 85, 86, 87, 88, 89]])
+#
+SEQ_ARRAY = np.arange(90).reshape(9,10)
+NDRF = NDRefFrame(SEQ_ARRAY)
+
+# Construct an array of evenvalues for later tests
+#
+# array([[ 0,  2,  4,  6],
+#        [ 8, 10, 12, 14],
+#        [16, 18, 20, 22]])
+SEQ_ARRAY2 = np.arange(0,24,2).reshape(3,4).astype(np.float64)
+NDRF2 = NDRefFrame(SEQ_ARRAY2)
+## END: GLOBALS ##
+
+################################################################################
+# Test default construction parameters
+################################################################################
+
+def test_default_array_values():
+    """ Test default 'ndarray' equality (shape and elements)."""
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(SEQ_ARRAY, NDRF)
+
+def test_creation_from_iterables():
+    """ Test default 'ndarray' equality (shape and elements)."""
+    # Create an NDRefFrame from a list of lists
+    ndrf = NDRefFrame(SEQ_ARRAY.tolist())
+
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(SEQ_ARRAY, ndrf)
+
+    # Create an NDRefFrame from a tuple of lists
+    ndrf = NDRefFrame(tuple(SEQ_ARRAY.tolist()))
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(SEQ_ARRAY, ndrf)
+
+    # Create an NDRefFrame from a tuple of tuples
+    ndrf = NDRefFrame(tuple([tuple(i) for i in SEQ_ARRAY.tolist()]))
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(SEQ_ARRAY, ndrf)
+
+def test_default_position_index():
+    """ Test default 'position_index' equality (shape and elements)."""
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.zeros(2), NDRF.position_index)
+
+def test_default_position():
+    """ Test default 'position' equality (shape and elements)."""
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.zeros(2), NDRF.position)
+
+def test_default_origin():
+    """ Test default 'origin' equality (shape and elements)."""
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.zeros(2), NDRF.origin)
+
+def test_default_scaling():
+    """ Test default 'scaling' equality (shape and elements)."""
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.ones(2), NDRF.scaling)
+
+def test_default_spacing():
+    """ Test default 'spacing' equality (shape and elements)."""
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.ones(2), NDRF.spacing)
+
+def test_default_offset():
+    """ Test default 'offset' equality (shape and elements)."""
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.zeros(2), NDRF.offset)
+    
+def test_default_axes_object_construction():
+    """ Test to see if the NDRF object has an 'Axes' object."""
+    # Did the NDRefFrame construct the 'Axes' object?
+    assert hasattr(NDRF, 'axes')
+
+def test_default_number_of_axis_objects():
+    """ Test the number of 'Axis' objects the NDRF.axes object has (should have 
+        one for each dimension).
+    """
+    # Does it have the expected nuber of 'Axis' objects (2 expected)?
+    assert len(NDRF.axes) == 2
+
+def test_default_axis_labels():
+    """ Test to see if the 'Axis' object labels are correctle set to None."""
+    # Are the 'Axis' objects' labels set to their default values (None)?
+    assert NDRF.axes[0].label is None
+    assert NDRF.axes[1].label is None
+    
+def test_default_axis_handedness():
+    """ Test to see if the 'Axis' objects' handedness are correctly set to 'R'.
+    """
+    # Are the 'Axis' objects' handedness set to their default values (R)?
+    assert NDRF.axes[0].handedness == 'R'
+    assert NDRF.axes[1].handedness == 'R'
+
+def test_default_axis_mappers():
+    """ Test to see if the 'Axis' object mappers are 'LinearMappers'.
+    """
+    # Are the coordinate mappers for each 'Axis' object LinearMappers (default)
+    assert type(NDRF.axes[0].mapper) is LinearCoordinateMapper
+    assert type(NDRF.axes[1].mapper) is LinearCoordinateMapper
+    
+def test_default_axis_coordinates():
+    """ Test  the default 'Axis' objects coordinates."""
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.arange(9), NDRF.axes[0].coordinates)
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.arange(10), NDRF.axes[1].coordinates)
+
+################################################################################
+# Test the Axes functionality
+################################################################################
+
+def test_axes_axis_label_initial_assignment():
+    """ Test 'Axes' objct behavior upon initial setting of an 'Axis' objects 
+        'label' attribute value.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF.copy('A')
+
+    # Test setting axis 0 label to 'j' (should result in creation of axes
+    # attribute with the same name)    
+    ndrf.axes[0].label = 'j'
+    assert hasattr(ndrf.axes, 'j')
+    
+    # Test that Axes attribute 'j' is the same object as ndrf.axes[0]. 
+    # (Both should point to the same Axis object)
+    assert ndrf.axes[0] is ndrf.axes.j
+    
+    # Test setting axis 1 label to 'i' (should result in creation of axes
+    # attribute with the same name)
+    ndrf.axes[1].label = 'i'
+    assert hasattr(ndrf.axes, 'i')
+    
+    # Test that Axes attribute 'i' is the same object as ndrf.axes[1]. 
+    # (Both should point to the same Axis object)
+    assert ndrf.axes[1] is ndrf.axes.i
+
+    # Test changing axis 0 label to 'y' (should result in creation of axes
+    # attribute with the same name and removal of 'j' attribute from previous 
+    # test)
+    ndrf.axes[0].label = 'y'
+    assert hasattr(ndrf.axes, 'y')
+    assert not hasattr(ndrf.axes, 'j')
+    
+    # Test changing axis 1 label to 'x' (should result in creation of axes
+    # attribute with the same name and removal of 'i' attribute from previous 
+    # test))
+    ndrf.axes[1].label = 'x'
+    assert hasattr(ndrf.axes, 'x')
+    assert not hasattr(ndrf.axes, 'i')
+    
+    # Test that Axes attribute 'y' is the same object as ndrf.axes[0]. 
+    # (Both should point to the same Axis object)
+    assert ndrf.axes[0] is ndrf.axes.y
+    
+    # Test that Axes attribute 'x' is the same object as ndrf.axes[1]. 
+    # (Both should point to the same Axis object)
+    assert ndrf.axes[1] is ndrf.axes.x
+    
+def test_axis_properties_with_copy():
+    """ Test 'Axes' objct behavior upon changing one of the 'Axis' objects 
+        'label' attribute value.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF.copy('A')
+
+    # Test setting axis 0 label to 'j' (should result in creation of axes
+    # attribute with the same name)    
+    ndrf.axes[0].label = 'j'
+    assert hasattr(ndrf.axes, 'j')
+    
+    # Test setting axis 1 label to 'i' (should result in creation of axes
+    # attribute with the same name)
+    ndrf.axes[1].label = 'i'
+    assert hasattr(ndrf.axes, 'i')
+
+    # Set handedness for each axis to 'L' to test axes properties upon copy()
+    ndrf.axes.i.handedness = 'L'
+    ndrf.axes.j.handedness = 'L'
+
+    # Make a copy of the NDRefFrame
+    ndrfc = ndrf.copy('A')
+
+    # Test the axis properties of the copy
+    assert ndrfc.axes[0].label == 'j'
+    assert ndrfc.axes[1].label == 'i'
+    assert ndrfc.axes.j.handedness == 'L'
+    assert ndrfc.axes.i.handedness == 'L'
+
+    # Grab an ROI using the Ellipsis
+    ndrfc = ndrf[...]
+
+    # Test the axis properties of the copy
+    assert ndrfc.axes[0].label == 'j'
+    assert ndrfc.axes[1].label == 'i'
+    assert ndrfc.axes.j.handedness == 'L'
+    assert ndrfc.axes.i.handedness == 'L'
+
+    # Grab an ROI using the an empty slice (i.e. slice(None, None, None))
+    ndrfc = ndrf[::]
+
+    # Test the axis properties of the copy
+    assert ndrfc.axes[0].label == 'j'
+    assert ndrfc.axes[1].label == 'i'
+    assert ndrfc.axes.j.handedness == 'L'
+    assert ndrfc.axes.i.handedness == 'L'
+
+    # Grab an ROI using the a single slice
+    ndrfc = ndrf[0:2]
+
+    # Test the axis properties of the copy
+    assert ndrfc.axes[0].label == 'j'
+    assert ndrfc.axes[1].label == 'i'
+    assert ndrfc.axes.j.handedness == 'L'
+    assert ndrfc.axes.i.handedness == 'L'
+
+    # Grab an ROI using a slice for each dimension
+    ndrfc = ndrf[0:2, 0:2]
+
+    # Test the axis properties of the copy
+    assert ndrfc.axes[0].label == 'j'
+    assert ndrfc.axes[1].label == 'i'
+    assert ndrfc.axes.j.handedness == 'L'
+    assert ndrfc.axes.i.handedness == 'L'
+
+################################################################################
+# Test mapper functionality
+################################################################################
+
+def test_axis_linear_mapper_handeness_change():
+    """ Test 'NDRefFram.axes.axis.coordinates after Axis.handedness change.
+        
+        Changing NDRefFrame.axes.axis.handedness from 'R' to 'L'
+        
+        NDRefFrame.axes[0].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8])
+        to:   array([ 0, -1, -2, -3, -4, -5, -6, -7, -8])
+
+        NDRefFrame.axes[1].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        to:   array([ 0, -1, -2, -3, -4, -5, -6, -7, -8, -9])
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF.copy('A')
+    
+    # Test NDRefFram.axes[0].handedness change (switch and switch back) and 
+    # check the second axis remains unchanged
+    ndrf.axes[0].handedness = 'L'
+    assert np.array_equal(np.arange(9)*-1, ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10), ndrf.axes[1].coordinates)
+    
+    ndrf.axes[0].handedness = 'R'
+    assert np.array_equal(np.arange(9), ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10), ndrf.axes[1].coordinates)
+    
+    # Test NDRefFram.axes[1].handedness change (switch and switch back) and 
+    # check the second axis remains unchanged
+    ndrf.axes[1].handedness = 'L'
+    assert np.array_equal(np.arange(10)*-1, ndrf.axes[1].coordinates)
+    assert np.array_equal(np.arange(9), ndrf.axes[0].coordinates)
+    
+    ndrf.axes[1].handedness = 'R'
+    assert np.array_equal(np.arange(10), ndrf.axes[1].coordinates)
+    assert np.array_equal(np.arange(9), ndrf.axes[0].coordinates)
+    
+def test_axis_linear_mapper_position_index_change():
+    """ Test NDRefFram.axes.axis.coordinates after NDRefFrame.position_index
+        change.
+        
+        Changing NDRefFrame.poisition_inxes from [0,0] to [1,1]
+        
+        NDRefFrame.axes[0].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8])
+        to:   array([-1,  0,  1,  2,  3,  4,  5,  6,  7])
+        
+        NDRefFrame.axes[1].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        to:   array([-1,  0,  1,  2,  3,  4,  5,  6,  7,  8])
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF.copy('A')
+    
+    # Test NDRefFram.axes[0].coordinate after 'position_index' change
+    # (switch and switch back)
+    ndrf.position_index = np.ones(2)
+    assert np.array_equal(np.arange(9)-1, ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10)-1, ndrf.axes[1].coordinates)
+    
+    ndrf.position_index = np.zeros(2)
+    assert np.array_equal(np.arange(9), ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10), ndrf.axes[1].coordinates)
+    
+def test_axis_linear_mapper_position_change():
+    """ Test NDRefFram.axes.axis.coordinates after NDRefFrame.position change.
+        
+        Changing NDRefFrame.poisition from [0,0] to [1,1]
+        
+        NDRefFrame.axes[0].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8])
+        to:   array([1, 2, 3, 4, 5, 6, 7, 8, 9])
+        
+        NDRefFrame.axes[1].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        to:   array([ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10])
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF.copy('A')
+    
+    # Test NDRefFram.axes[0].coordinate after 'position' change
+    # (switch and switch back)
+    ndrf.position = np.ones(2)
+    assert np.array_equal(np.arange(1,10), ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(1,11), ndrf.axes[1].coordinates)
+    
+    ndrf.position = np.zeros(2)
+    assert np.array_equal(np.arange(9), ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10), ndrf.axes[1].coordinates)   
+    
+def test_axis_linear_mapper_origin_change():
+    """ Test NDRefFram.axes.axis.coordinates after NDRefFrame.origin change.
+        
+        Changing NDRefFrame.origin from [0,0] to [0.5,0.5]
+        
+        NDRefFrame.axes[0].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8])
+        to:   array([-0.5,  0.5,  1.5,  2.5,  3.5,  4.5,  5.5,  6.5,  7.5])
+        
+        NDRefFrame.axes[1].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        to:   array([-0.5,  0.5,  1.5,  2.5,  3.5,  4.5,  5.5,  6.5,  7.5,  
+                     8.5])
+
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF.copy('A')
+    
+    # Test NDRefFram.axes[0].coordinate after 'origin' change
+    # (switch and switch back)
+    ndrf.origin = np.zeros(2) + 0.5
+    assert np.array_equal(np.arange(9) - 0.5, ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10) - 0.5, ndrf.axes[1].coordinates)
+    
+    ndrf.origin = np.zeros(2)
+    assert np.array_equal(np.arange(9), ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10), ndrf.axes[1].coordinates)
+    
+def test_axis_linear_mapper_spacing_change():
+    """ Test NDRefFram.axes.axis.coordinates after NDRefFrame.spacing change.
+        
+        Changing NDRefFrame.spacing from [0,0] to [0.5,0.5]
+        
+        NDRefFrame.axes[0].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8])
+        to:   array([ 0. ,  0.5,  1. ,  1.5,  2. ,  2.5,  3. ,  3.5,  4. ])
+        
+        NDRefFrame.axes[1].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        to:   array([ 0. ,  0.5,  1. ,  1.5,  2. ,  2.5,  3. ,  3.5,  4. ,  
+                     4.5])
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF.copy('A')
+    
+    # Test NDRefFram.axes[0].coordinate after 'spacing' change
+    # (switch and switch back)
+    ndrf.spacing = np.zeros(2) + 0.5
+    assert np.array_equal(np.arange(9) * 0.5, ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10) * 0.5, ndrf.axes[1].coordinates)
+    
+    ndrf.spacing = np.ones(2)
+    assert np.array_equal(np.arange(9), ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10), ndrf.axes[1].coordinates)
+
+def test_axis_linear_mapper_scaling_change():
+    """ Test NDRefFram.axes.axis.coordinates after NDRefFrame.scaling change.
+        
+        Changing NDRefFrame.scaling from [0,0] to [2,2]
+        
+        NDRefFrame.axes[0].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8])
+        to:   array([  0.,   2.,   4.,   6.,   8.,  10.,  12.,  14.,  16.])
+        
+        NDRefFrame.axes[1].coordinates should change 
+        from: array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        to:   array([  0.,   2.,   4.,   6.,   8.,  10.,  12.,  14.,  16.,  
+                     18.])
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF.copy('A')
+    
+    # Test NDRefFram.axes[0].coordinate after 'scaling' change
+    # (switch and switch back)
+    ndrf.scaling = np.zeros(2) + 2.0
+    assert np.array_equal(np.arange(9) * 2.0, ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10) * 2.0, ndrf.axes[1].coordinates)
+    
+    ndrf.scaling = np.ones(2)
+    assert np.array_equal(np.arange(9), ndrf.axes[0].coordinates)
+    assert np.array_equal(np.arange(10), ndrf.axes[1].coordinates)
+
+################################################################################
+# Test the NDRefFram functionality
+################################################################################
+
+def test_ndrf_table_array():
+    """ Test NDRefFram.table_array expected values.
+        
+        Expected values:
+        
+        array([[  0.,   0.,   0.],
+               [  0.,   1.,   2.],
+               [  0.,   2.,   4.],
+               [  0.,   3.,   6.],
+               [  1.,   0.,   8.],
+               [  1.,   1.,  10.],
+               [  1.,   2.,  12.],
+               [  1.,   3.,  14.],
+               [  2.,   0.,  16.],
+               [  2.,   1.,  18.],
+               [  2.,   2.,  20.],
+               [  2.,   3.,  22.]])
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Generate the expected default axis coordinates
+    x1 = np.arange(4)
+    y0 = np.arange(3)
+    
+    # Generate a fully fleshed out meshgrid for each array
+    Y, X = np.meshgrid(y0,x1)
+    
+    # Stack the axes coordinates with the array values to generate the 
+    # comparison array
+    table_array = np.vstack((Y.T.ravel(), X.T.ravel(), SEQ_ARRAY2.ravel())).T
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(table_array, ndrf.table_array)
+    
+def test_ndrf_coordinate_recarray():
+    """ Test NDRefFram.coordinate_recarray expected values.
+        
+        Expected values:
+        
+        array([[(0.0, 0.0), (0.0, 1.0), (0.0, 2.0), (0.0, 3.0)],
+               [(1.0, 0.0), (1.0, 1.0), (1.0, 2.0), (1.0, 3.0)],
+               [(2.0, 0.0), (2.0, 1.0), (2.0, 2.0), (2.0, 3.0)]], 
+              dtype=[('axis_0', '<f8'), ('axis_1', '<f8')])
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Generate the expected default axis coordinates
+    x1 = np.arange(4)
+    y0 = np.arange(3)
+    dt = np.dtype([('axis_0', '<f8'), ('axis_1', '<f8')])
+    
+    # Generate a fully fleshed out meshgrid for each array
+    Y, X = np.meshgrid(y0,x1)
+    
+    # Stack the axes coordinates values at convert to a python list
+    coord_list = np.vstack((Y.T.ravel(), X.T.ravel())).T.tolist()
+    
+    # Convert each entry to a tuple
+    coord_list = [tuple(coord) for coord in coord_list]
+    
+    # Create the comparison coordinate_array using the coord_list and np.dtype
+    coordinate_recarray= np.array(coord_list, dtype=dt).reshape(ndrf.shape)
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(coordinate_recarray, ndrf.coordinate_recarray)
+    
+def test_ndrf_coordinates_to_index():
+    """ Test NDRefFram.coordinates_to_index.
+    
+        Set NDRefFrame.spacing to [2,2] so that coordinates have even spacing.
+        Once you have even spacing chose a coordante of [1,1] so that the 
+        associated index will be half way betweed the coordinate positions.
+        
+        Expected index value: (array([ 0.5]), array([ 0.5]))
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Set spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    assert ndrf.coordinates_to_index(np.ones(2)) == (np.array([ 0.5]), 
+                                                     np.array([ 0.5]))
+
+def test_ndrf_coordinates_to_index_edge_case_with_offset():
+    """ Test NDRefFram.coordinates_to_index edge cases with offset != 0.
+    
+        Change the NDRefFrame.offset so that coordinates represent the right 
+        edge of the "pixel" in a 2D image like array. Choose a coordinate of 
+        [-1,-1] so that the coordinate is below the first coordinate value of 
+        [0,0] but still within the first pixel and then a coordinate of 
+        [4,4] which is just beyond the right edge of the last pixel.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+
+    # Test a coordinate beyond left edge of array with offset = [0,0]
+    with pytest.raises(ValueError):
+        ndrf.coordinates_to_index(-np.ones(2))
+
+    # Test a coordinate just inside right edge of array with offset = [0,0]
+    assert ndrf.coordinates_to_index(np.ones(2)*4) == (np.array([4.]),
+                                                       np.array([4.]))
+
+    # Set offset to [1,1]
+    ndrf.offset = np.ones(2)
+    
+    # Test same coordinate now just inside of the first pixel boundary (left)
+    assert ndrf.coordinates_to_index(-np.ones(2)) == (np.array([-1.]),
+                                                      np.array([-1.]))
+
+    # Test a coordinate now beyond right edge of array with offset = [0,0]
+    with pytest.raises(ValueError):
+        ndrf.coordinates_to_index(-np.ones(2)*4)
+    
+
+def test_ndrf_coordinates_to_index_with_handedness_change():
+    """ Test NDRefFram.coordinates_to_index.
+    
+        Set NDRefFrame.spacing to [2,2] so that coordinates have even spacing.
+        Switch the handedness of one of the Axis objects so that the coordinates 
+        change from array([0., 2., 4.]) to array([ 0., -2., -4.]). Once you have 
+        even spacing and a handedness change chose a coordante of [-1,1] so that 
+        the associated index will be half way betweed the coordinate positions.
+        
+        Expected index value: (array([ 0.5]), array([ 0.5]))
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Set spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+
+    # Set the handedness of axis 0 to 'L'
+    ndrf.axes[0].handedness = 'L'
+    
+    assert ndrf.coordinates_to_index(np.array([-1,1])) == (np.array([ 0.5]), 
+                                                     np.array([ 0.5]))
+    
+def test_ndrf_index_to_coordinates():
+    """ Test NDRefFram.index_to_coordinates.
+    
+        Set NDRefFrame.spacing to [2,2] so that coordinates have even spacing.
+        Once you have even spacing chose an index of [np.array([ 1.5]), 
+        np.array([ 1.5])] so that the associated Coordinate will be half way 
+        betweed the coordinate positions.
+        
+        Expected coordinate value: array([[ 3.,  3.]])
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Set spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Grab coodinate value at the index (np.array([ 1.5]),np.array([ 1.5]))
+    coordinate = ndrf.index_to_coordinates((np.array([ 1.5]),np.array([ 1.5])))
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(coordinate, np.array([[ 3.,  3.]]))
+
+def test_ndrf_index_to_coordinates_with_handedness_change():
+    """ Test NDRefFram.index_to_coordinates.
+    
+        Set NDRefFrame.spacing to [2,2] so that coordinates have even spacing.
+        Switch the handedness of one of the Axis objects so that the coordinates 
+        change from array([0., 2., 4.]) to array([ 0., -2., -4.]). Once you have 
+        even spacing chose an index of [np.array([ 1.5]), np.array([ 1.5])] so 
+        that the associated coordinate will be half way betweed the coordinate 
+        positions.
+        
+        Expected coordinate value: array([[ 3.,  3.]])
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Set spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+
+    # Set the handedness of axis 0 to 'L'
+    ndrf.axes[0].handedness = 'L'
+    
+    # Grab coodinate value at the index (np.array([ 1.5]),np.array([ 1.5]))
+    coordinate = ndrf.index_to_coordinates((np.array([ 1.5]),np.array([ 1.5])))
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(coordinate, np.array([[ -3.,  3.]]))
+    
+def test_ndrf_probe():
+    """ Test NDRefFram.probe.
+    
+        Probe the dataset represented by the NDRefFrame at the coordinate [1,1]
+        after setting the spacing to [2,2]. This places the coordinate of 
+        interest half way between the grid points resulting in the need for 
+        interpolations in both directions to get thevalue. 
+        
+        Expected value at coordinate: array([5])
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Set spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Grab coodinate value at the index (np.array([ 1.5]),np.array([ 1.5]))
+    value = ndrf.probe(np.ones(2))
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(value, np.array([5]))
+
+def test_property_validation():
+    """ Test the validation of array based property values. """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Try to assign arrays of the wrong length to the various properties 
+    # expecting the validation code to raise a 'ValueError'
+    with pytest.raises(ValueError):
+        ndrf.position_index = np.zeros(1)
+        
+    with pytest.raises(ValueError):
+        ndrf.position = np.zeros(1)
+        
+    with pytest.raises(ValueError):
+        ndrf.origin = np.zeros(1)
+        
+    with pytest.raises(ValueError):
+        ndrf.scaling = np.zeros(1)
+        
+    with pytest.raises(ValueError):
+        ndrf.spacing = np.zeros(1)
+        
+    with pytest.raises(ValueError):
+        ndrf.offset = np.zeros(1)
+        
+def test_position_index_validation_none():
+    """ Test the validation of array based property values when None is given 
+        as the new value. 
+        
+        When None is supplied as the value to one of the NDRefFrame array 
+        properties it should return the default value when accessed in the 
+        future unless it is successfully set to another value prior to being 
+        accessed again.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Set position_index to [1,1] (default is [0,0])
+    ndrf.position_index = np.ones(2)
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.ones(2), ndrf.position_index)
+    
+    # Set NDRefFrame.position_index to 'None' resulting in a return value of  
+    # [0,0] (default).
+    ndrf.position_index = None
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.zeros(2), ndrf.position_index)
+    
+def test_position_validation_none():
+    """ Test the validation of array based property values when None is given 
+        as the new value. 
+        
+        When None is supplied as the value to one of the NDRefFrame array 
+        properties it should return the default value when accessed in the 
+        future unless it is successfully set to another value prior to being 
+        accessed again.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Set position to [1,1] (default is [0,0])
+    ndrf.position = np.ones(2)
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.ones(2), ndrf.position)
+    
+    # Set NDRefFrame.position to 'None' resulting in a return value of  
+    # [0,0] (default).
+    ndrf.position = None
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.zeros(2), ndrf.position)
+    
+def test_origin_validation_none():
+    """ Test the validation of array based property values when None is given 
+        as the new value. 
+        
+        When None is supplied as the value to one of the NDRefFrame array 
+        properties it should return the default value when accessed in the 
+        future unless it is successfully set to another value prior to being 
+        accessed again.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Set origin to [1,1] (default is [0,0])
+    ndrf.origin = np.ones(2)
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.ones(2), ndrf.origin)
+    
+    # Set NDRefFrame.origin to 'None' resulting in a return value of  
+    # [0,0] (default).
+    ndrf.origin = None
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.zeros(2), ndrf.origin)
+    
+def test_scaling_validation_none():
+    """ Test the validation of array based property values when None is given 
+        as the new value. 
+        
+        When None is supplied as the value to one of the NDRefFrame array 
+        properties it should return the default value when accessed in the 
+        future unless it is successfully set to another value prior to being 
+        accessed again.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Set scaling to [2,2] (default is [1,1])
+    ndrf.scaling = np.ones(2)*2
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.ones(2)*2, ndrf.scaling)
+    
+    # Set NDRefFrame.scaling to 'None' resulting in a return value of  
+    # [1,1] (default).
+    ndrf.scaling = None
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.ones(2), ndrf.scaling)
+    
+def test_spacing_validation_none():
+    """ Test the validation of array based property values when None is given 
+        as the new value. 
+        
+        When None is supplied as the value to one of the NDRefFrame array 
+        properties it should return the default value when accessed in the 
+        future unless it is successfully set to another value prior to being 
+        accessed again.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Set spacing to [2,2] (default is [1,1])
+    ndrf.spacing = np.ones(2)*2
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.ones(2)*2, ndrf.spacing)
+    
+    # Set NDRefFrame.spacing to 'None' resulting in a return value of  
+    # [1,1] (default).
+    ndrf.spacing = None
+    
+    # True if two arrays have the same shape and elements, False otherwise.
+    assert np.array_equal(np.ones(2), ndrf.spacing)
+
+################################################################################
+# Test the NDRefFram ROI functionality
+################################################################################
+
+def test_roi_coordinate_frame_with_change_in_dimensionality():
+    """ Test if ROI coordinate frame settings with change in dimensionality"""
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+
+    # Change the position [1,1]
+    ndrf.position = np.ones(2)
+
+    # Change the position_index to [1,1]
+    ndrf.position_index = np.ones(2)
+
+    # Change the origin to [1,1]
+    ndrf.origin = np.ones(2)
+
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+
+    # Change the scaling to [2,2]
+    ndrf.scaling = np.ones(2)*2
+
+    # Change the offset to [1,1]
+    ndrf.spacing = np.ones(2)
+
+    # Use an int as the single index to reduce the dimensionality
+    roi = ndrf[1]
+
+    # Check dimensionlity
+    assert roi.ndim == 1
+
+    # Check to make sure all coordinate frame values are set to defaults after 
+    # dimensionality reduction.
+    assert np.array_equal(roi.position, np.zeros(roi.ndim))
+    assert np.array_equal(roi.position_index, np.zeros(roi.ndim))
+    assert np.array_equal(roi.origin, np.zeros(roi.ndim))
+    assert np.array_equal(roi.spacing, np.ones(roi.ndim))
+    assert np.array_equal(roi.scaling, np.ones(roi.ndim))
+    assert np.array_equal(roi.offset, np.zeros(roi.ndim))
+
+    # Expected coordinates should now be np.array([0,1,2,3])
+    assert np.array_equal(roi.coordinates, np.arange(4))
+
+    # Expected values should be the same as the row from the original numpy 
+    # array
+    assert np.array_equal(roi, SEQ_ARRAY2[1])
+
+def test_roi_coordinates_with_ellipsis():
+    """ Test if ROI coordinates are as expected with single ellipsis indexing"""
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+
+    # Use Ellipsis as the single index
+    roi = ndrf[...]
+
+    # Expected coordinates should be the same as the parent NDRefFrame
+    assert np.array_equal(roi.coordinates, ndrf.coordinates)
+
+    # Expected elements should be the same as the parent NDRefFrame
+    assert np.array_equal(roi, ndrf)
+
+    # Expected elements should be the same as the original numpy array
+    assert np.array_equal(roi, SEQ_ARRAY2)
+
+def test_roi_coordinates_with_empty_slice():
+    """ Test if ROI coordinates are as expected with single empty slice for 
+        indexing
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+
+    # Use single empty slice as the index
+    roi = ndrf[::]
+
+    # Expected coordinates should be the same as the parent NDRefFrame
+    assert np.array_equal(roi.coordinates, ndrf.coordinates)
+
+    # Expected elements should be the same as the parent NDRefFrame
+    assert np.array_equal(roi, ndrf)
+
+    # Expected elements should be the same as the original numpy array
+    assert np.array_equal(roi, SEQ_ARRAY2)
+
+def test_roi_coordinates_with_single_slice():
+    """ Test if ROI coordinates are as expected with single slice for indexing
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+
+    # Use single empty slice as the index
+    roi = ndrf[0:2]
+
+    # Expected coordinates should be the coordinates for the first 2 rows of the 
+    # parent NDRefFrame (2 rows 4 coordinate pairs per row)
+    assert np.array_equal(roi.coordinates, ndrf.coordinates[0:8])
+
+    # Expected elements should be the same as the parent NDRefFrame
+    assert np.array_equal(roi, ndrf[0:2])
+
+    # Expected elements should be the same as the original numpy array
+    assert np.array_equal(roi, SEQ_ARRAY2[0:2])
+
+def test_roi_coordinates_with_slice_step_greater_than_one():
+    """ Test if ROI coordinates when slice step is greater than 1 for indexing
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+
+    # Use single empty slice as the index
+    roi = ndrf[::2,::2]
+
+    # With step size 2 the expected spacing should now be twice the original 
+    assert np.array_equal(roi.spacing, ndrf.spacing*2)
+
+    # Expected coordinates and values should be those for the first and third 
+    # column and first and third rows
+    table = np.array([[0., 0.,  0.],
+                      [0., 4.,  4.],
+                      [4., 0., 16.],
+                      [4., 4., 20.]
+                     ]
+                    )
+
+    # Check expected coordinates and values can be checked in the table array
+    assert np.array_equal(roi.table_array, table)
+
+    # Expected elements should be the same as the original numpy array
+    assert np.array_equal(roi, SEQ_ARRAY2[::2,::2])
+
+def test_roi_coordinates_with_different_slice_steps():
+    """ Test if ROI coordinates when slice steps are different for indexing
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+
+    # Use single empty slice as the index
+    roi = ndrf[::,::2]
+
+    # With step size 2 the expected spacing should now be twice the original 
+    assert np.array_equal(roi.spacing, ndrf.spacing*np.array([1,2]))
+
+    # Expected coordinates and values should be those for the first and third 
+    # column and all rows
+    table = np.array([[0., 0.,  0.],
+                      [0., 4.,  4.],
+                      [2., 0.,  8.],
+                      [2., 4., 12.],
+                      [4., 0., 16.],
+                      [4., 4., 20.]
+                     ]
+                    )
+
+    # Check expected coordinates and values can be checked in the table array
+    assert np.array_equal(roi.table_array, table)
+
+    # Expected elements should be the same as the original numpy array
+    assert np.array_equal(roi, SEQ_ARRAY2[::,::2])
+
+def test_roi_coordinates_with_negative_slicing():
+    """ Test if ROI coordinates when slice start, stop and step are negative
+    """
+    # NOTE: This is probably never going to be used and I can't think of a 
+    #       reason why anyone would use this at the moment but we are checking 
+    #       it because we want the coordinate to pixel relationship to remain 
+    #       consistnt
+
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+
+    # Use negative slicing to get the botom corver of the array inverted
+    roi = ndrf[-1:-3:-1, -1:-3:-1]
+
+    # The ROI should be the inverted bottom corner of the original array
+    #
+    # NDRefFrame([[12., 14.],
+    #             [20., 22.]])
+    #
+    test = np.array([[22., 20.],
+                     [14., 12.]])
+
+    # Test the array values first
+    assert np.array_equal(roi, test)
+
+    # The roi coordinate to value relationship should remain consistent with the 
+    # original coordinate to value relationship
+    #
+    # ndrf.table_array = array([[ 2.,  4., 12.],
+    #                           [ 2.,  6., 14.],
+    #                           [ 4.,  4., 20.],
+    #                           [ 4.,  6., 22.]])
+    #
+    # So the ROI should have...
+    #
+    # roi.table_array = array([[ 4.,  6., 22.],
+    #                          [ 4.,  4., 20.],
+    #                          [ 2.,  6., 14.],
+    #                          [ 2.,  4., 12.]])
+    #
+    table = np.array([[ 4.,  6., 22.],
+                      [ 4.,  4., 20.],
+                      [ 2.,  6., 14.],
+                      [ 2.,  4., 12.]])
+    
+    assert np.array_equal(roi.table_array, table)
+
+################################################################################
+# Test the NDRefLocator functionality
+################################################################################
+
+def test_ndrf_place_locator():
+    """ Test NDRefFram.place_marker. """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Place a single marker at the coordinate [1,1]
+    loc = ndrf.place_locator(np.ones(2))
+    
+    # Make sure it returns the correct value.
+    assert type(loc) == NDRefLocator
+
+def test_ndlocator_value():
+    """ Test NDRefLocator.value property.
+    
+        NDRefLocator.value should use the underlying NDRefFrame.probe method and 
+        its 'index_tuple' property to retrieve the value on the array at the 
+        marker's relative location. If the NDRefFrame properties that dictate 
+        its coordinates change but the underlying numpy array values have not 
+        then the NDRefLocator.value property should stay the same and should be
+        transparent to the user.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Place a single marker at the coordinate [1,1] (e.g. half way between to 
+    # coordinates on the array with coordinates [0,2,4,...N])
+    loc = ndrf.place_locator(np.ones(2))
+    
+    # Make sure it returns the correct value (bilinear interpolation on the 2D 
+    # array should return 5 using the underlying NDRefFrame.probe method.
+    assert loc.value == 5
+    
+    # Change the spacing back to [1,1]
+    ndrf.spacing = np.ones(2)
+    
+    # Make sure it returns the correct value now that the coordinates are 
+    # different from when it was first created (bilinear interpolation on the 
+    # 2D array should still return 5 using the underlying NDRefFrame.probe 
+    # method.
+    assert loc.value == 5
+    
+    # Changes to the underlying numpy array values should result in changes to 
+    # the ndlocator.value property
+    
+    # Double the values in the array. 
+    ndrf *= 2
+    
+    # Make sure it returns the correct value now that the array values are 
+    # different from when it was first created (bilinear interpolation on the 
+    # 2D array should now return 10 using the underlying NDRefFrame.probe 
+    # method.
+    assert loc.value == 10
+    
+def test_ndlocator_index_tuple():
+    """ Test NDRefLocator.index_tuple property.
+    
+        NDRefLocator.index_tuple should reflect the relative position on the 
+        underlying numpy array in index coordinates. The NDRefLocatoris actually 
+        created using this relative position to ensure changes to the undelyig 
+        NDRefFrame coordinates result in a transparent return of the NDRefLocator's 
+        new coordinates when accessed.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Place a single marker at the coordinate [1,1] (e.g. half way between to 
+    # coordinates on the array with coordinates [0,2,4,...N]).
+    loc = ndrf.place_locator(np.ones(2))
+    
+    # Make sure you get the correct index_tuple. In this case [1,1] is half way
+    # between [0,0] (index 0,0) and [2,2] (index 1,1) so the resulting tuple 
+    # should be (np.array([ 0.5]), np.array([ 0.5]))
+    assert loc.index_tuple == (np.array([ 0.5]), np.array([ 0.5]))
+    
+    # Changes to the underlying numpy array values should not result in changes 
+    # to the NDRefLocator.coordinates property
+    
+    # Double the values in the array. 
+    ndrf *= 2
+    
+    # Make sure you still get the correct index_tuple.
+    assert loc.index_tuple == (np.array([ 0.5]), np.array([ 0.5]))    
+
+def test_ndlocator_coordinates():
+    """ Test NDRefLocator.coordinates property.
+    
+        NDRefLocator.coordinates should return the coordinate supplied when the 
+        marker was created as long as the coordinate properties that determine 
+        the NDRefFrame have not changed. If the properties that determine the 
+        coordinates have changed the NDRefLocator should transparently return the 
+        new coordinate for its relative location on the underlying NDRefFrame.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Place a single marker at the coordinate [1,1] (e.g. half way between to 
+    # coordinates on the array with coordinates [0,2,4,...N]).
+    loc = ndrf.place_locator(np.ones(2))
+    
+    # Make sure it returns the correct coordinate.
+    assert np.array_equal(loc.coordinates, np.ones(2)[None,::])
+    
+    # Change the spacing back to [1,1]
+    ndrf.spacing = np.ones(2)
+    
+    # Make sure it returns the correct coordinate.
+    assert np.array_equal(loc.coordinates, np.ones(2)[None,::]*0.5)
+    
+    # Changes to the underlying numpy array values should not result in changes 
+    # to the NDRefLocator.coordinates property
+    
+    # Double the values in the array. 
+    ndrf *= 2
+    
+    # Make sure it still returns the correct coordinate.
+    assert np.array_equal(loc.coordinates, np.ones(2)[None,::]*0.5)
+    
+def test_ndlocator_coordinates_changing_position_index():
+    """ Test NDRefLocator.coordinate property with NDRefFrame.position_index 
+        change.
+    
+        NDRefLocator.coordinates should return the coordinate supplied when the 
+        marker was created as long as the coordinate properties that determine 
+        the NDRefFrame have not changed. If the properties that determine the 
+        coordinates have changed the NDRefLocator should transparently return the 
+        new coordinate for its relative location on the underlying NDRefFrame.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Place a single marker at the coordinate [1,1] (e.g. half way between to 
+    # coordinates on the array with coordinates [0,2,4,...N]).
+    loc = ndrf.place_locator(np.ones(2))
+    
+    # Change the NDRefFrame.position_index to [1,1] (coordinate [2,2] -> [0,0]
+    # [0,0] -> [-2,-2]) but value on the array doesn't change.
+    ndrf.position_index = np.ones(2)
+    
+    # Make sure it returns the correct coordinate. The coordinate now at the 
+    # index_tuple of (np.array([ 0.5]), np.array([ 0.5])) should be [-1,-1] 
+    # (i.e. half way between [-2,-2] and [0,0])
+    assert np.array_equal(loc.coordinates, -np.ones(2)[None,::])
+    
+def test_ndlocator_coordinates_changing_position():
+    """ Test NDRefLocator.coordinate property with NDRefFrame.position change.
+    
+        NDRefLocator.coordinates should return the coordinate supplied when the 
+        marker was created as long as the coordinate properties that determine 
+        the NDRefFrame have not changed. If the properties that determine the 
+        coordinates have changed the NDRefLocator should transparently return the 
+        new coordinate for its relative location on the underlying NDRefFrame.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Place a single marker at the coordinate [1,1] (e.g. half way between to 
+    # coordinates on the array with coordinates [0,2,4,...N]).
+    loc = ndrf.place_locator(np.ones(2))
+    
+    # Change the NDRefFrame.position to [-2,-2] (coordinate [2,2] -> [0,0]
+    # [0,0] -> [-2,-2]) but value on the array doesn't change.
+    ndrf.position = np.ones(2)*-2
+    
+    # Make sure it returns the correct coordinate. The coordinate now at the 
+    # index_tuple of (np.array([ 0.5]), np.array([ 0.5])) should be [-1,-1] 
+    # (i.e. half way between [-2,-2] and [0,0])
+    assert np.array_equal(loc.coordinates, -np.ones(2)[None,::])
+    
+def test_ndlocator_coordinates_changing_origin():
+    """ Test NDRefLocator.coordinate property with NDRefFrame.origin change.
+    
+        NDRefLocator.coordinates should return the coordinate supplied when the 
+        marker was created as long as the coordinate properties that determine 
+        the NDRefFrame have not changed. If the properties that determine the 
+        coordinates have changed the NDRefLocator should transparently return the 
+        new coordinate for its relative location on the underlying NDRefFrame.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Place a single marker at the coordinate [1,1] (e.g. half way between to 
+    # coordinates on the array with coordinates [0,2,4,...N]).
+    loc = ndrf.place_locator(np.ones(2))
+    
+    # Change the NDRefFrame.origin to [-1,-1] (coordinate [0,0] -> [1,1]
+    # [2,2] -> [3,3]) but value on the array doesn't change.
+    ndrf.origin = np.ones(2)*-1
+    
+    # Make sure it returns the correct coordinate. The coordinate now at the 
+    # index_tuple of (np.array([ 0.5]), np.array([ 0.5])) should be [2,2] 
+    # (i.e. half way between [1,1] and [3,3])
+    assert np.array_equal(loc.coordinates, np.ones(2)[None,::] * 2)
+    
+def test_ndlocator_coordinates_changing_scaling():
+    """ Test NDRefLocator.coordinate property with NDRefFrame.scaling change.
+    
+        NDRefLocator.coordinates should return the coordinate supplied when the 
+        marker was created as long as the coordinate properties that determine 
+        the NDRefFrame have not changed. If the properties that determine the 
+        coordinates have changed the NDRefLocator should transparently return the 
+        new coordinate for its relative location on the underlying NDRefFrame.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Place a single marker at the coordinate [1,1] (e.g. half way between to 
+    # coordinates on the array with coordinates [0,2,4,...N]).
+    loc = ndrf.place_locator(np.ones(2))
+    
+    # Change the NDRefFrame.scaling to [0.5,0.5] (coordinate [0,0] -> [0,0]
+    # [2,2] -> [1,1]) but value on the array doesn't change.
+    ndrf.scaling = np.ones(2)*0.5
+    
+    # Make sure it returns the correct coordinate. The coordinate now at the 
+    # index_tuple of (np.array([ 0.5]), np.array([ 0.5])) should be [0.5,0.5] 
+    # (i.e. half way between [0,0] and [1,1])
+    assert np.array_equal(loc.coordinates, np.ones(2)[None,::] * 0.5)
+    
+def test_ndlocator_coordinates_changing_spacing():
+    """ Test NDRefLocator.coordinate property with NDRefFrame.spacing change.
+    
+        NDRefLocator.coordinates should return the coordinate supplied when the 
+        marker was created as long as the coordinate properties that determine 
+        the NDRefFrame have not changed. If the properties that determine the 
+        coordinates have changed the NDRefLocator should transparently return the 
+        new coordinate for its relative location on the underlying NDRefFrame.
+    """
+    # Make copy of the global NDRefFrame for this test.
+    ndrf = NDRF2.copy('A')
+    
+    # Change the spacing to [2,2]
+    ndrf.spacing = np.ones(2)*2
+    
+    # Place a single marker at the coordinate [1,1] (e.g. half way between to 
+    # coordinates on the array with coordinates [0,2,4,...N]).
+    loc = ndrf.place_locator(np.ones(2))
+    
+    # Change the NDRefFrame.spacing to [1,1] (coordinate [0,0] -> [0,0]
+    # [2,2] -> [1,1]) but value on the array doesn't change.
+    ndrf.spacing = np.ones(2)
+    
+    # Make sure it returns the correct coordinate. The coordinate now at the 
+    # index_tuple of (np.array([ 0.5]), np.array([ 0.5])) should be [0.5,0.5] 
+    # (i.e. half way between [0,0] and [1,1])
+    assert np.array_equal(loc.coordinates, np.ones(2)[None,::] * 0.5)

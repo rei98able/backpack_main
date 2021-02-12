@@ -1,0 +1,244 @@
+# -*- coding: utf-8 -*-
+'''
+Copyright (c) 2015 Michael J Tallhamer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+@author: Michael J Tallhamer M.Sc DABR (mike.tallhamer@gmail.com)
+'''
+
+# Standard python imports
+
+# Third party imports
+import numpy as np
+
+# Local imports.
+
+class CoordMapper(object):
+    def __init__(self, axis, **kwargs):
+        super(CoordMapper, self).__init__(**kwargs)
+
+        if issubclass(type(axis), Axis):
+            self._axis = axis
+        else:
+            msg = "'axis' must be an Axis class or subclass"
+            raise ValueError(msg)
+        
+    #--------------------------------------------------------------------------
+    #  'CoordMapper' Property Interface.
+    #--------------------------------------------------------------------------
+    
+    @property
+    def axis(self):
+        """ Returns the underlying Axis the coordinate mapper maps coordinates 
+            for.
+        """
+        return self._axis
+        
+    @property
+    def coordinates(self):
+        """ Returns the 1D array of coordinates for the axis of the reference
+            frame being represented by the mapper.
+        """
+        return NotImplemented
+            
+    @property
+    def coordinate_mesh(self):
+        """ Returns the coordinate mesh of coordinates for the dimension of
+            the grid being represented by the mapper. It should be of the same 
+            form as what you would expect from using the numpy function mgrid 
+            to construct the dense (or fleshed out) mesh-grid of coordinates 
+            and appropriate for the dimension being mapped.
+        """
+        return NotImplemented
+
+
+class LinearCoordinateMapper(CoordMapper):
+    """ Maps coordinate values along a single axes of a given reference frame 
+        in a linear fashion assuming that each point along the axis is equally 
+        space.
+    """
+
+    def __init__(self, axis, **kwargs):
+        super(LinearCoordinateMapper, self).__init__(axis, **kwargs)
+
+    @property
+    def axis(self):
+        """ Returns the underlying Axis the coordinate mapper maps coordinates 
+            for.
+        """
+        return self._axis
+
+    @property
+    def coordinates(self):
+        """ Returnes the 1D array of coordinates for the axes of the reference 
+            frame being represented by the mapper.
+        """
+        # First generate an array of values based on the number of points on 
+        # the grid along the dimension being mapped and then apply the spacing 
+        # and scaling along that dimension.
+        a = np.arange(self._axis.ndframe.shape[self._axis.dim]) * \
+            self._axis.ndframe.spacing[self._axis.dim] * \
+            self._axis.ndframe.scaling[self._axis.dim]
+        
+        # If the handedness is 'left' the reverse the direction of the axes
+        if self._axis.handedness == 'L':
+            a = a * -1
+            
+        # Shift the array based on the position_index value for that dimension.
+        # Add the value for the absolute position along that dimension offset
+        # by the position of the grid origin.
+        coords = (a - a[self._axis.ndframe.position_index[self._axis.dim]]) + \
+                 (self._axis.ndframe.position[self._axis.dim] - \
+                 self._axis.ndframe.origin[self._axis.dim])
+        
+        return coords
+
+            
+    @property
+    def coordinate_mesh(self):
+        """ Returns the coordinate mesh of coordinates for the demension of 
+            the grid being represented by the mapper. It should be of the same 
+            form as what you would expect from using the numpy function mgrid 
+            to construct the dense (or fleshed out) mesh-grid of coordinates and 
+            appropriate for the dimension being mapped.
+        """
+        # Add the correct number of dimensions to the coordinate array based on
+        # the dimension of the grid it represents.
+        
+        temp = eval('self.coordinates[:'+(',None' * \
+                        ((self._axis.ndframe.ndim - 1) - self._axis.dim))+']')
+        
+        # Use broadcasting to your advantage to construct a coordinate_mesh of 
+        # the right form. The coordinate_mesh is returned to the grid for 
+        # constructing a coordinate array.
+        mesh = temp + np.zeros_like(self._axis.ndframe)
+        
+        return mesh
+
+
+class Axes(dict):
+    """ """
+    def __init__(self, **kwargs):
+        super(Axes, self).__init__()
+        
+    def __setitem__(self, key, value):
+        if not isinstance(value, Axis):
+            msg = 'Only an Axis object can be added to an Axes collection.'
+            raise ValueError(msg)
+
+        super(Axes, self).__setitem__(key, value)
+
+class Axis(object):
+    def __init__(self, ndframe, dim=0, handedness='R', mapper=None, **kwargs):
+                                  
+        super(Axis, self).__init__(**kwargs)
+        
+        self._ndframe = ndframe
+        self._dim = dim
+        self._handedness = handedness
+        self._label = None
+        
+        if mapper is None:
+            self.mapper = LinearCoordinateMapper(self)
+        else:
+            self.mapper = mapper
+            
+        label = kwargs.get('label', None)
+        if not label is None:
+            self.label = label
+
+    @property
+    def ndframe(self):
+        """ Returns the underlying NDRefFrame for this axis.
+        """
+        return self._ndframe
+
+    @property
+    def dim(self):
+        """ Returns the dimension of the reference frame the axis represents.
+        """
+        return self._dim
+
+    @property
+    def handedness(self):
+        """ Returns the orientation of the axis which will represent the 
+            dimension of the reference frame the mapper operates on.
+        """
+        return self._handedness
+
+    @handedness.setter
+    def handedness(self, value):
+        """ Sets the orientation of the axis which will represent the dimension 
+            of the reference frame the mapper operates on.
+        """
+        # Make sure the value is either 'right' or 'left' before setting it.
+        if value in ['R', 'L']:
+            self._handedness = value
+        else:
+            raise ValueError("Handedness must be either 'R' right or 'L' left")
+            
+    @property
+    def mapper(self):
+        """ Returns the underlying coordinate mapper maps coordinates for this 
+            axis.
+        """
+        return self._mapper
+
+    @mapper.setter
+    def mapper(self, value):
+        """ Sets the underlying coordinate mapper maps coordinates for this 
+            axis.
+        """
+        # First make sure the value is an instance or subclass of CoordMapper
+        if issubclass(type(value), CoordMapper):
+            self._mapper = value
+        else:
+            msg = "'value' must be an CoordMapper class or subclass"
+            raise ValueError(msg)
+            
+    @property
+    def label(self):
+        return self._label
+
+    @label.setter
+    def label(self, value):
+        if value is None:
+            if self._label is None:
+                pass
+            else:
+                del self.ndframe.axes.__dict__[self._label]
+        else:
+            if self._label is None:
+                if not hasattr(self.ndframe.axes, value):
+                    setattr(self.ndframe.axes, value, self)
+                    self._label = value
+                else:
+                    raise AttributeError("%r already has an atrribute named %s."%(self.ndframe.axes, value))
+            else:
+                del self.ndframe.axes.__dict__[self._label]
+                setattr(self.ndframe.axes, value, self)
+            
+    @property
+    def coordinates(self):
+        return self.mapper.coordinates
+        
+    @property
+    def coordinate_mesh(self):
+        return self.mapper.coordinate_mesh
